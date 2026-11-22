@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Scanner · {{ event.name }} · eTickting{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start gap-3 mb-4"><div><p class="text-uppercase text-primary small fw-semibold mb-2">Staff scanner</p><h1 class="h2">{{ event.name }}</h1><p class="text-secondary mb-0">Scan and admit one ticket at a time. The server remains the source of truth.</p></div><a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">Dashboard</a></div>
+{% if devices %}<div class="row justify-content-center"><div class="col-lg-7"><div class="card shadow-sm p-4"><form id="scan-form"><input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}"><label class="form-label fw-semibold" for="device">Scanner device</label><select id="device" class="form-select mb-3" required>{% for device in devices %}<option value="{{ device.device_id }}">{{ device.device_id }}</option>{% endfor %}</select><label class="form-label fw-semibold" for="scan-credential">QR credential</label><textarea id="scan-credential" class="form-control font-monospace mb-3" rows="4" required autofocus placeholder="Scan or paste the QR credential"></textarea><button class="btn btn-primary btn-lg w-100" type="submit">Check and admit</button></form><div id="scan-result" class="mt-4" aria-live="assertive"></div></div></div></div>{% else %}<div class="alert alert-warning"><h2 class="h5">No active scanner device</h2><p class="mb-0">Your account has access to this event, but no active device is registered for you. An organisation administrator must register one before scanning.</p></div>{% endif %}
+<script>
+function getCookie(name) { return document.cookie.split('; ').find(row => row.startsWith(name + '='))?.split('=')[1]; }
+const scanForm = document.getElementById('scan-form');
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+if (scanForm) scanForm.addEventListener('submit', async (event) => {
+  event.preventDefault(); const box = document.getElementById('scan-result'); const button = scanForm.querySelector('button');
+  button.disabled = true; box.innerHTML = '<div class="alert alert-info">Checking ticket…</div>';
+  try {
+    const response = await fetch('{% url "ticketing:ticket-scan" event.id %}', {method: 'POST', headers: {'X-CSRFToken': decodeURIComponent(getCookie('csrftoken') || ''), 'X-Scanner-Device': document.getElementById('device').value}, body: new URLSearchParams({credential: document.getElementById('scan-credential').value.trim()})});
+    const data = await response.json(); const valid = data.status === 'valid'; const used = data.status === 'used';
+    box.innerHTML = `<div class="alert ${valid ? 'alert-success' : used ? 'alert-warning' : 'alert-danger'}"><h2 class="h4">${valid ? 'Admitted' : used ? 'Already admitted' : 'Do not admit'}</h2><p class="mb-1">Status: <strong>${escapeHtml(data.status || 'unknown')}</strong></p>${valid ? `<p class="mb-0">Reference: ${escapeHtml(data.ticket_reference)}${data.seat ? `<br>Seat: ${escapeHtml(data.seat)}` : ''}${data.attendee_name ? `<br>Attendee: ${escapeHtml(data.attendee_name)}` : ''}</p>` : '<p class="mb-0">This result has been recorded. Follow your event procedures.</p>'}</div>`;
+    if (valid) document.getElementById('scan-credential').value = '';
+  } catch (error) { box.innerHTML = '<div class="alert alert-danger">Scanner service unavailable. Do not admit the ticket until it has been checked.</div>'; }
+  button.disabled = false;
+});
+</script>
+{% endblock %}

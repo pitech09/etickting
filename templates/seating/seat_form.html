@@ -1,0 +1,53 @@
+{% extends "base.html" %}{% block title %}Edit seat · eTickting{% endblock %}{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h1 class="h3 mb-4">Edit seat</h1>
+        <p class="text-secondary mb-4">{{ seat.label }} · {{ seat.row.section.name }}</p>
+        <form method="post" novalidate>
+          {% csrf_token %}
+          <div class="row g-3">
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">{{ form.number.label }}</label>
+              {{ form.number }}
+              {% if form.number.errors %}<div class="text-danger small">{{ form.number.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">{{ form.label.label }}</label>
+              {{ form.label }}
+              {% if form.label.errors %}<div class="text-danger small">{{ form.label.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">{{ form.status.label }}</label>
+              {{ form.status }}
+              {% if form.status.errors %}<div class="text-danger small">{{ form.status.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-4">
+              <label class="form-label fw-semibold">{{ form.sort_order.label }}</label>
+              {{ form.sort_order }}
+              {% if form.sort_order.errors %}<div class="text-danger small">{{ form.sort_order.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-4">
+              <div class="form-check mt-7 d-flex align-items-center">
+                {{ form.is_accessible }}
+                <label class="form-label ms-2 fw-normal">{{ form.is_accessible.label }}</label>
+              </div>
+            </div>
+            <div class="col-md-4">
+              <div class="form-check mt-7 d-flex align-items-center">
+                {{ form.is_restricted_view }}
+                <label class="form-label ms-2 fw-normal">{{ form.is_restricted_view.label }}</label>
+              </div>
+            </div>
+          </div>
+          <div class="d-flex justify-content-between mt-4">
+            <a href="{% url 'seating:seat-list' seat.row_id %}" class="btn btn-outline-secondary">Cancel</a>
+            <button class="btn btn-primary">Save changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

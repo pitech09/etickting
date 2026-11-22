@@ -1,0 +1,66 @@
+{% extends "base.html" %}{% block title %}{% if object %}Edit {{ object.name }}{% else %}Add ticket category{% endif %} · eTickting{% endblock %}{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h1 class="h3 mb-4">{% if object %}Edit ticket category{% else %}Add ticket category{% endif %}</h1>
+        <form method="post" novalidate>
+          {% csrf_token %}
+          <div class="row g-3">
+            <div class="col-12">
+              <label class="form-label fw-semibold">{{ form.name.label }}</label>
+              {{ form.name }}
+              {% if form.name.errors %}<div class="text-danger small">{{ form.name.errors }}</div>{% endif %}
+            </div>
+            <div class="col-12">
+              <label class="form-label fw-semibold">{{ form.description.label }}</label>
+              {{ form.description }}
+              <div class="form-text">Describe this ticket category (e.g. General Admission, VIP, Early Bird).</div>
+              {% if form.description.errors %}<div class="text-danger small">{{ form.description.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">{{ form.price_minor.label }}</label>
+              {{ form.price_minor }}
+              <div class="form-text">Price in Maloti (M). Enter whole numbers only (e.g. 150 for M150.00).</div>
+              {% if form.price_minor.errors %}<div class="text-danger small">{{ form.price_minor.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">{{ form.total_quantity.label }}</label>
+              {{ form.total_quantity }}
+              <div class="form-text">Total number of tickets available in this category.</div>
+              {% if form.total_quantity.errors %}<div class="text-danger small">{{ form.total_quantity.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">{{ form.max_per_customer.label }}</label>
+              {{ form.max_per_customer }}
+              <div class="form-text">Maximum tickets one customer can buy from this category.</div>
+              {% if form.max_per_customer.errors %}<div class="text-danger small">{{ form.max_per_customer.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">{{ form.sales_opens_at.label }}</label>
+              {{ form.sales_opens_at }}
+              <div class="form-text">Leave blank to use event sales open time.</div>
+              {% if form.sales_opens_at.errors %}<div class="text-danger small">{{ form.sales_opens_at.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">{{ form.sales_closes_at.label }}</label>
+              {{ form.sales_closes_at }}
+              <div class="form-text">Leave blank to use event sales close time.</div>
+              {% if form.sales_closes_at.errors %}<div class="text-danger small">{{ form.sales_closes_at.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-6">
+              <label class="form-label fw-semibold">{{ form.is_active.label }}</label>
+              {{ form.is_active }}
+              {% if form.is_active.errors %}<div class="text-danger small">{{ form.is_active.errors }}</div>{% endif %}
+            </div>
+          </div>
+          <div class="d-flex justify-content-between mt-4">
+            <a href="{% url 'ticketing:ticket-category-list' event.id %}" class="btn btn-outline-secondary">Cancel</a>
+            <button class="btn btn-primary">{% if object %}Save changes{% else %}Add category{% endif %}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

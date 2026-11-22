@@ -1,0 +1,13 @@
+{% extends "base.html" %}{% block title %}{{ event.name }} · eTickting{% endblock %}{% block content %}
+<div class="row justify-content-center">
+  <div class="col-lg-8">
+    <div class="card shadow-sm text-center py-5">
+      <div class="card-body">
+        <h1 class="h3">No reserved seating for this event</h1>
+        <p class="text-secondary">This event uses general admission ticketing and does not have assigned seats.</p>
+        <a href="{% url 'ticketing:event-list' %}" class="btn btn-primary">Back to events</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

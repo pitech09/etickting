@@ -1,0 +1,35 @@
+services:
+  web:
+    build: .
+    command: sh -c "python manage.py migrate --noinput && uvicorn config.asgi:application --host 0.0.0.0 --port 8000"
+    ports:
+      - "8000:8000"
+    environment:
+      DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:-local-compose-only-change-me}
+      DJANGO_DEBUG: ${DJANGO_DEBUG:-true}
+      DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:-localhost,127.0.0.1}
+      DATABASE_URL: postgres://etickting:etickting@db:5432/etickting
+      REDIS_URL: redis://redis:6379/0
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_started
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: etickting
+      POSTGRES_USER: etickting
+      POSTGRES_PASSWORD: etickting
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U etickting -d etickting"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+  redis:
+    image: redis:7-alpine
+
+volumes:
+  postgres_data:

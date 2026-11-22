@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "etickting"
+version = "0.1.0"
+description = "Secure event ticketing platform for Lesotho and the region"
+requires-python = ">=3.12"
+dependencies = [
+    "Django>=5.2,<5.3",
+    "djangorestframework>=3.15,<4",
+    "channels>=4.2,<5",
+    "channels-redis>=4.2,<5",
+    "celery>=5.4,<6",
+    "psycopg[binary]>=3.2,<4",
+    "dj-database-url>=2.3,<3",
+    "python-dotenv>=1.0,<2",
+    "uvicorn[standard]>=0.32,<1",
+    "cryptography>=43,<47",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.3", "pytest-django>=4.9", "ruff>=0.8"]
+
+[tool.setuptools.packages.find]
+include = ["accounts*", "config*", "core*", "dashboard*", "organisations*", "ticketing*", "venues*"]
+
+[tool.pytest.ini_options]
+DJANGO_SETTINGS_MODULE = "config.settings"
+python_files = ["tests.py", "test_*.py", "*_tests.py"]
+addopts = "--strict-markers"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"

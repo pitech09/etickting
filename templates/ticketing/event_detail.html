@@ -1,0 +1,94 @@
+{% extends "base.html" %}{% block title %}{{ event.name }} · eTickting{% endblock %}{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-4">
+  <div>
+    <p class="text-uppercase text-primary small fw-semibold mb-2">Event details</p>
+    <h1 class="display-6 fw-bold">{{ event.name }}</h1>
+  </div>
+  <div class="d-flex gap-2">
+    <a href="{% url 'ticketing:event-update' event.id %}" class="btn btn-outline-secondary">Edit</a>
+    {% if event.status == 'draft' %}
+    <form method="post" action="{% url 'ticketing:event-publish' event.id %}" class="d-inline">
+      {% csrf_token %}
+      <button class="btn btn-success">Publish</button>
+    </form>
+    {% elif event.status == 'published' %}
+    <form method="post" action="{% url 'ticketing:event-sales-open' event.id %}" class="d-inline">
+      {% csrf_token %}
+      <button class="btn btn-primary">Open sales</button>
+    </form>
+    {% endif %}
+    <a href="{% url 'ticketing:ticket-scanner-page' event.id %}" class="btn btn-primary">Open scanner</a>
+  </div>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card shadow-sm mb-4">
+      <div class="card-body">
+        <h2 class="h4 mb-3">Overview</h2>
+        <dl class="row">
+          <dt class="col-sm-4">Status</dt>
+          <dd class="col-sm-8"><span class="badge text-bg-{% if event.status == 'published' %}success{% elif event.status == 'sales_open' %}info{% elif event.status == 'draft' %}secondary{% else %}warning{% endif %}">{{ event.get_status_display }}</span></dd>
+          <dt class="col-sm-4">Ticketing model</dt>
+          <dd class="col-sm-8">{{ event.get_ticketing_model_display }}</dd>
+          <dt class="col-sm-4">Organisation</dt>
+          <dd class="col-sm-8">{{ event.organisation.name }}</dd>
+          <dt class="col-sm-4">Venue</dt>
+          <dd class="col-sm-8">{{ event.venue.name|default:'Not set' }}</dd>
+          <dt class="col-sm-4">Starts at</dt>
+          <dd class="col-sm-8">{{ event.starts_at|date:"j M Y · H:i" }}</dd>
+          {% if event.ends_at %}
+          <dt class="col-sm-4">Ends at</dt>
+          <dd class="col-sm-8">{{ event.ends_at|date:"j M Y · H:i" }}</dd>
+          {% endif %}
+          {% if event.sales_opens_at %}
+          <dt class="col-sm-4">Sales open at</dt>
+          <dd class="col-sm-8">{{ event.sales_opens_at|date:"j M Y · H:i" }}</dd>
+          {% endif %}
+          {% if event.sales_closes_at %}
+          <dt class="col-sm-4">Sales close at</dt>
+          <dd class="col-sm-8">{{ event.sales_closes_at|date:"j M Y · H:i" }}</dd>
+          {% endif %}
+          <dt class="col-sm-4">Timezone</dt>
+          <dd class="col-sm-8">{{ event.timezone }}</dd>
+        </dl>
+        {% if event.description %}
+        <div class="mt-4">
+          <h2 class="h4 mb-3">Description</h2>
+          <p>{{ event.description|linebreaks }}</p>
+        </div>
+        {% endif %}
+        {% if event.refund_policy %}
+        <div class="mt-4">
+          <h2 class="h4 mb-3">Refund policy</h2>
+          <p>{{ event.refund_policy|linebreaks }}</p>
+        </div>
+        {% endif %}
+        {% if event.resale_policy %}
+        <div class="mt-4">
+          <h2 class="h4 mb-3">Resale policy</h2>
+          <p>{{ event.resale_policy|linebreaks }}</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-body">
+        <h2 class="h4 mb-3">Actions</h2>
+        {% if event.status == 'draft' %}
+        <p class="text-secondary">This event is a draft. Publish it to make it visible to customers.</p>
+        {% elif event.status == 'published' %}
+        <p class="text-secondary">This event is published. Open sales to start selling tickets.</p>
+        {% elif event.status == 'sales_open' %}
+        <p class="text-success">Ticket sales are open for this event.</p>
+        {% endif %}
+        <hr>
+        <a href="{% url 'ticketing:ticket-category-list' event.id %}" class="btn btn-outline-primary w-100">Manage ticket categories</a>
+        <a href="{% url 'ticketing:event-list' %}" class="btn btn-outline-secondary w-100 mt-2">Back to events</a>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

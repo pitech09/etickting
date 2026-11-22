@@ -1,0 +1,52 @@
+{% extends "base.html" %}{% block title %}Seat map · {{ event.name }} · eTickting{% endblock %}{% block content %}
+<div class="d-flex justify-content-between align-items-start mb-4">
+  <div>
+    <p class="text-uppercase text-primary small fw-semibold mb-2">Select your seats</p>
+    <h1 class="display-6 fw-bold">{{ event.name }}</h1>
+    <p class="text-secondary small mb-0">{{ event.starts_at|date:"j M Y · H:i" }} · {{ event.venue.name }}</p>
+  </div>
+  <a href="{% url 'ticketing:event-list' %}" class="btn btn-outline-secondary">Back to events</a>
+</div>
+
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-body p-0">
+        <div class="p-4 border-bottom">
+          <h3 class="h5 mb-0">Seating map</h3>
+          <p class="text-secondary small mb-0">Select seats by clicking on them. Selected seats are held for 10 minutes while you complete checkout.</p>
+        </div>
+        <div class="p-4" id="seating-map-container">
+          <div class="legend d-flex align-items-center gap-3 mb-3 flex-wrap">
+            <span class="badge text-bg-success">Available</span>
+            <span class="badge text-bg-primary">Selected</span>
+            <span class="badge text-bg-warning">Temporarily reserved</span>
+            <span class="badge text-bg-danger">Sold</span>
+            <span class="badge text-bg-secondary">Blocked</span>
+            <span class="badge text-bg-light text-dark border">Unavailable</span>
+          </div>
+          <div class="stage text-center text-secondary small mb-4">Stage</div>
+          <div id="seat-map" class="seat-map"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card shadow-sm sticky-top" style="top: 1rem;">
+      <div class="card-body">
+        <h3 class="h5 mb-3">Your selection</h3>
+        <div id="selected-seats" class="mb-3">
+          <p class="text-secondary small mb-0">No seats selected yet.</p>
+        </div>
+        <div id="selection-total" class="mb-4">
+          <p class="text-secondary small">Total: <span class="fw-bold">M0.00</span></p>
+        </div>
+        <button id="checkout-btn" class="btn btn-primary w-100 disabled" disabled>Continue to checkout</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% include "seating/_seat_map_data.html" with seat_data=seat_data event=event %}
+<script src="{% static 'seating/js/seat-map.js' %}" defer></script>
+{% endblock %}
