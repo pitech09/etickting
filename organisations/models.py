@@ -9,6 +9,11 @@ class Organisation(models.Model):
     name = models.CharField(max_length=180)
     slug = models.SlugField(max_length=190, unique=True)
     description = models.TextField(blank=True)
+    payment_number = models.CharField(
+        max_length=80,
+        blank=True,
+        help_text="M-Pesa, EcoCash or merchant number customers should pay.",
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
@@ -17,6 +22,33 @@ class Organisation(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class OrganisationPaymentMethod(models.Model):
+    class Provider(models.TextChoices):
+        MPESA = "mpesa", "M-Pesa"
+        ECOCASH = "ecocash", "EcoCash"
+        BANK = "bank", "Bank transfer"
+        OTHER = "other", "Other"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    organisation = models.ForeignKey(
+        Organisation, on_delete=models.CASCADE, related_name="payment_methods"
+    )
+    provider = models.CharField(max_length=20, choices=Provider.choices)
+    label = models.CharField(max_length=100, help_text="Short name customers will recognise")
+    account_number = models.CharField(max_length=120, help_text="Number, merchant code or account identifier")
+    instructions = models.TextField(blank=True)
+    is_active = models.BooleanField(default=True)
+    sort_order = models.PositiveIntegerField(default=0)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("sort_order", "label")
+
+    def __str__(self):
+        return f"{self.organisation.name} — {self.label}"
 
 
 class OrganisationMembership(models.Model):

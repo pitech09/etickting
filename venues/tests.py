@@ -24,23 +24,11 @@ class VenueTests(TestCase):
             role=OrganisationMembership.Role.EVENT_MANAGER,
         )
 
-    def test_user_can_create_venue_in_own_organisation(self):
+    def test_venue_list_does_not_offer_a_separate_create_flow(self):
         self.client.force_login(self.user)
-        response = self.client.post(
-            reverse("venue-create"),
-            {
-                "organisation": self.organisation.pk,
-                "name": "Maseru Hall",
-                "slug": "maseru-hall",
-                "city": "Maseru",
-                "country": "Lesotho",
-                "capacity": 500,
-            },
-        )
-        self.assertRedirects(response, reverse("venue-list"))
-        self.assertTrue(
-            Venue.objects.filter(name="Maseru Hall", organisation=self.organisation).exists()
-        )
+        response = self.client.get(reverse("venue-list"))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, "Add venue")
 
     def test_user_cannot_see_venues_from_other_organisation(self):
         other_org = Organisation.objects.create(

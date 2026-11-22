@@ -1,6 +1,7 @@
 from django import forms
 
-from ticketing.models import TicketCategory
+from seating.models import Seat
+from ticketing.models import Event, TicketCategory
 
 
 class OrderCreateForm(forms.Form):
@@ -14,16 +15,14 @@ class OrderCreateForm(forms.Form):
             # Add ticket category choices
             self.fields["ticket_category"] = forms.ChoiceField(
                 label="Ticket category",
-                choices=[(tc.id, tc.name) for tc in TicketCategory.objects.filter(event=event).select_related("event")],
-                required=False,
+                choices=[(str(tc.id), tc.name) for tc in TicketCategory.objects.filter(event=event, is_active=True).select_related("event")],
+                required=True,
             )
             # Add seat choices if reserved seating
             if event.ticketing_model == Event.TicketingModel.RESERVED_SEATING:
-                from seating.models import Seat
-
                 self.fields["seat"] = forms.ChoiceField(
                     label="Seat",
-                    choices=[(str(s.id), s.label) for s in Seat.objects.filter(row__section__venue=event.venue).select_related("row__section")],
+                    choices=[(str(s.id), s.label) for s in Seat.objects.filter(row__section__venue=event.venue, status=Seat.Status.AVAILABLE).select_related("row__section")],
                     required=False,
                 )
             # Add quantity field for general admission
@@ -42,11 +41,14 @@ class OrderCreateForm(forms.Form):
         quantity = cleaned_data.get("quantity")
 
         # Validation: ticket category or seat must be selected
-        if not ticket_category and not seat:
-            self.add_error(None, "You must select a ticket category or seat.")
+        if not ticket_category:
+            self.add_error("ticket_category", "Choose a ticket category.")
+
+        if self.event and self.event.ticketing_model == Event.TicketingModel.RESERVED_SEATING and not seat:
+            self.add_error("seat", "Choose a seat.")
 
         # Validation: quantity must be provided for GA
-        if not quantity and self.event.ticketing_model == Event.TicketingModel.GENERAL_ADMISSION:
+        if self.event and not quantity and self.event.ticketing_model == Event.TicketingModel.GENERAL_ADMISSION:
             self.add_error("quantity", "Quantity is required for general admission tickets.")
 
         return cleaned_data

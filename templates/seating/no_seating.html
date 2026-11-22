@@ -5,7 +5,7 @@
       <div class="card-body">
         <h1 class="h3">No reserved seating for this event</h1>
         <p class="text-secondary">This event uses general admission ticketing and does not have assigned seats.</p>
-        <a href="{% url 'ticketing:event-list' %}" class="btn btn-primary">Back to events</a>
+        <a href="{% url 'public-event-detail' event.id %}" class="btn btn-primary">Back to event</a>
       </div>
     </div>
   </div>

@@ -12,20 +12,28 @@
               {{ form.name }}
               {% if form.name.errors %}<div class="text-danger small">{{ form.name.errors }}</div>{% endif %}
             </div>
-            <div class="col-md-6">
-              <label class="form-label fw-semibold">{{ form.organisation.label }}</label>
-              {{ form.organisation }}
-              {% if form.organisation.errors %}<div class="text-danger small">{{ form.organisation.errors }}</div>{% endif %}
-            </div>
-            <div class="col-md-6">
-              <label class="form-label fw-semibold">{{ form.venue.label }}</label>
-              {{ form.venue }}
-              {% if form.venue.errors %}<div class="text-danger small">{{ form.venue.errors }}</div>{% endif %}
-            </div>
+            <div class="col-12"><h2 class="h5 mt-2 mb-0">Ticket setup</h2><p class="text-secondary small mb-0">Set the first ticket type now. You can add more categories after the event is created.</p></div>
+            <div class="col-md-6"><label class="form-label fw-semibold">{{ form.ticket_name.label }}</label>{{ form.ticket_name }}{% if form.ticket_name.errors %}<div class="text-danger small">{{ form.ticket_name.errors }}</div>{% endif %}</div>
+            <div class="col-md-6"><label class="form-label fw-semibold">{{ form.ticket_price_maloti.label }}</label>{{ form.ticket_price_maloti }}{% if form.ticket_price_maloti.errors %}<div class="text-danger small">{{ form.ticket_price_maloti.errors }}</div>{% endif %}</div>
+            <div class="col-md-6" id="ticket-quantity-field"><label class="form-label fw-semibold">{{ form.ticket_quantity.label }}</label>{{ form.ticket_quantity }}{% if form.ticket_quantity.errors %}<div class="text-danger small">{{ form.ticket_quantity.errors }}</div>{% endif %}</div>
+            <div class="col-md-6"><label class="form-label fw-semibold">{{ form.ticket_max_per_customer.label }}</label>{{ form.ticket_max_per_customer }}{% if form.ticket_max_per_customer.errors %}<div class="text-danger small">{{ form.ticket_max_per_customer.errors }}</div>{% endif %}</div>
+            <div class="col-12"><h2 class="h5 mt-2 mb-0">Where is it happening?</h2><p class="text-secondary small mb-0">Enter the venue once. eTickting will save it with your organisation for this event.</p></div>
+            <div class="col-md-6"><label class="form-label fw-semibold">{{ form.venue_name.label }}</label>{{ form.venue_name }}{% if form.venue_name.errors %}<div class="text-danger small">{{ form.venue_name.errors }}</div>{% endif %}</div>
+            <div class="col-md-6"><label class="form-label fw-semibold">{{ form.venue_city.label }}</label>{{ form.venue_city }}{% if form.venue_city.errors %}<div class="text-danger small">{{ form.venue_city.errors }}</div>{% endif %}</div>
+            <div class="col-md-6"><label class="form-label fw-semibold">{{ form.venue_address_line_1.label }}</label>{{ form.venue_address_line_1 }}{% if form.venue_address_line_1.errors %}<div class="text-danger small">{{ form.venue_address_line_1.errors }}</div>{% endif %}</div>
+            <div class="col-md-6"><label class="form-label fw-semibold">{{ form.venue_address_line_2.label }}</label>{{ form.venue_address_line_2 }}{% if form.venue_address_line_2.errors %}<div class="text-danger small">{{ form.venue_address_line_2.errors }}</div>{% endif %}</div>
             <div class="col-md-6">
               <label class="form-label fw-semibold">{{ form.ticketing_model.label }}</label>
               {{ form.ticketing_model }}
               {% if form.ticketing_model.errors %}<div class="text-danger small">{{ form.ticketing_model.errors }}</div>{% endif %}
+            </div>
+            <div class="col-12" id="seating-settings">
+              <h2 class="h5 mt-2 mb-0">Seating layout</h2>
+              <p class="text-secondary small mb-2">Set any layout you need, such as 3 rows × 4 seats or a large stadium layout.</p>
+              <div class="row g-3">
+                <div class="col-md-6"><label class="form-label fw-semibold">{{ form.seating_rows.label }}</label>{{ form.seating_rows }}{% if form.seating_rows.help_text %}<div class="form-text">{{ form.seating_rows.help_text }}</div>{% endif %}{% if form.seating_rows.errors %}<div class="text-danger small">{{ form.seating_rows.errors }}</div>{% endif %}</div>
+                <div class="col-md-6"><label class="form-label fw-semibold">{{ form.seats_per_row.label }}</label>{{ form.seats_per_row }}{% if form.seats_per_row.help_text %}<div class="form-text">{{ form.seats_per_row.help_text }}</div>{% endif %}{% if form.seats_per_row.errors %}<div class="text-danger small">{{ form.seats_per_row.errors }}</div>{% endif %}</div>
+              </div>
             </div>
             <div class="col-12">
               <label class="form-label fw-semibold">{{ form.description.label }}</label>
@@ -91,6 +99,28 @@
         </form>
       </div>
     </div>
-  </div>
 </div>
+</div>
+<script>
+  (() => {
+    const model = document.getElementById("id_ticketing_model");
+    const settings = document.getElementById("seating-settings");
+    const quantity = document.getElementById("ticket-quantity-field");
+    const rows = document.getElementById("id_seating_rows");
+    const seats = document.getElementById("id_seats_per_row");
+    const quantityInput = document.getElementById("id_ticket_quantity");
+    const update = () => {
+      const reserved = model && model.value === "reserved_seating";
+      if (settings) settings.hidden = !reserved;
+      if (quantity) quantity.hidden = reserved;
+      if (reserved && rows && seats && quantityInput) {
+        quantityInput.value = (Number(rows.value || 0) * Number(seats.value || 0)) || "";
+      }
+    };
+    model?.addEventListener("change", update);
+    rows?.addEventListener("input", update);
+    seats?.addEventListener("input", update);
+    update();
+  })();
+</script>
 {% endblock %}

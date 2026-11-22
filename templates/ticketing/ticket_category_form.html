@@ -19,10 +19,10 @@
               {% if form.description.errors %}<div class="text-danger small">{{ form.description.errors }}</div>{% endif %}
             </div>
             <div class="col-md-6">
-              <label class="form-label fw-semibold">{{ form.price_minor.label }}</label>
-              {{ form.price_minor }}
-              <div class="form-text">Price in Maloti (M). Enter whole numbers only (e.g. 150 for M150.00).</div>
-              {% if form.price_minor.errors %}<div class="text-danger small">{{ form.price_minor.errors }}</div>{% endif %}
+              <label class="form-label fw-semibold">{{ form.price_maloti.label }}</label>
+              {{ form.price_maloti }}
+              <div class="form-text">Enter the customer-facing price in Maloti, for example 150.00 for M150.00.</div>
+              {% if form.price_maloti.errors %}<div class="text-danger small">{{ form.price_maloti.errors }}</div>{% endif %}
             </div>
             <div class="col-md-6">
               <label class="form-label fw-semibold">{{ form.total_quantity.label }}</label>

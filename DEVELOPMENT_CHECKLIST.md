@@ -52,47 +52,50 @@
 
 ## Phase 5 — digital tickets and attendee profiles
 
-- [ ] Ticket issuance and QR generation
-- [ ] Ticket download and customer dashboard
-- [ ] Attendee information and photograph upload
-- [ ] Photograph access controls
+- [x] Signed ticket issuance and QR generation
+- [x] Ticket download and owner-scoped customer wallet
+- [x] Attendee profile and ticket-specific photograph upload
+- [x] Encrypted credential delivery and owner access controls
 
 ## Phase 6 — organiser live inventory dashboard
 
-- [ ] General Admission live inventory dashboard
-- [ ] Interactive seating occupancy map
-- [ ] Django Channels WebSocket integration
-- [ ] Real-time occupancy updates
-- [ ] Analytics
+- [x] General Admission live inventory dashboard
+- [x] Interactive seating occupancy map with accessible labels and status legend
+- [x] Django Channels WebSocket integration with authenticated event access
+- [x] Post-commit inventory update notifications and polling fallback
+- [x] Occupancy, category sales and revenue metrics
 
 ## Phase 7 — scanner and admission
 
-- [ ] Scanner interface improvements
-- [ ] Admission state machine
-- [ ] Re-entry policies
-- [ ] Offline scanning
+- [x] Scanner interface improvements
+- [x] Admission state machine with single-entry and re-entry handling
+- [x] Re-entry policies
+- [x] Offline signed-scan upload with explicit pending reconciliation status
 
 ## Phase 8 — controlled resale marketplace
 
-- [ ] Resale eligibility and policies
-- [ ] Listing creation and marketplace
-- [ ] Ownership transfer with QR invalidation
-- [ ] Seller payout
+- [x] Resale eligibility and policies
+- [x] Listing creation service and marketplace UI
+- [x] Ownership transfer with QR invalidation
+- [ ] Seller payout settlement (requires finance/provider settlement workflow)
 
 ## Phase 9 — notifications and finance
 
-- [ ] Email and in-app notifications
-- [ ] Financial ledger and organiser reports
+- [x] In-app notifications and notification service
+- [x] Immutable-style balanced integer-minor-unit ledger foundation
+- [x] Organisation finance report
+- [ ] Email delivery and automated payout settlement
 
 ## Phase 10 — optional blockchain
 
-- [ ] Blockchain architecture and NFT minting
+- [x] Blockchain proof/reconciliation boundary
+- [ ] Live Web3 provider, contract deployment and NFT minting
 
 ## Phase 11 — production readiness
 
-- [ ] Security review
-- [ ] Performance testing
-- [ ] Production deployment
+- [x] Environment-based configuration and deployment documentation
+- [x] Automated checks and migration consistency validation
+- [ ] External-service load testing, backups, monitoring and final security review
 
 ## Known limitations
 
@@ -101,3 +104,10 @@
 - Offline scanner reconciliation and photograph verification are not yet implemented.
 - Concurrent PostgreSQL stress tests require a PostgreSQL test service.
 - Redis and live PostgreSQL connectivity require external services and credentials.
+- QR downloads are PNG credentials; native PDF generation is not yet implemented.
+- A dedicated staff-only attendee-photo endpoint remains for the scanner UI.
+- WebSocket delivery requires Redis; the dashboard automatically polls the database-backed snapshot when WebSockets are unavailable.
+- Offline scans are accepted as signature-checked pending records; they are not silently admitted offline because revocation and duplicate state require server reconciliation.
+- Marketplace purchases are sandbox-only when `DEBUG=true`; production purchases require a verified payment provider callback.
+- Blockchain records are reconciliation placeholders; no NFT or transaction is claimed without configured Web3 infrastructure.
+- Production readiness assets now include Redis readiness checks, offline reconciliation, operations runbooks, a healthcheck script, and a security review checklist. Backup restoration, monitoring, load testing and independent review still must be executed in the deployment environment.

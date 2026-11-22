@@ -1,0 +1,6 @@
+{% extends "base.html" %}
+{% block title %}Explore events · eTickting{% endblock %}
+{% block content %}
+<div class="page-intro public-list-intro"><p class="eyebrow">Your next plan</p><h1>Explore events</h1><p>Find concerts, conferences, festivals and community moments happening across Lesotho.</p><form class="list-search" method="get"><label class="visually-hidden" for="event-query">Search events</label><input id="event-query" name="q" type="search" value="{{ query }}" placeholder="Search by event, venue or city"><button class="btn btn-primary" type="submit">Search</button>{% if query %}<a class="btn btn-outline-secondary" href="{% url 'public-event-list' %}">Clear</a>{% endif %}</form></div>
+{% if events %}<div class="event-grid event-grid-wide">{% for event in events %}{% include "components/event_card.html" with event=event %}{% endfor %}</div>{% else %}<div class="empty-state"><span class="empty-icon">⌕</span><h2>No events found</h2><p>Try a different search, or check back soon for new experiences.</p><a class="btn btn-primary" href="{% url 'public-event-list' %}">Show all events</a></div>{% endif %}
+{% endblock %}

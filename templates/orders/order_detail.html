@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Order {{ order.reference }} · eTickting{% endblock %}
+{% block content %}
+<div class="checkout-shell">
+  <a class="back-link" href="{% url 'orders:order-list' %}">← Purchase history</a>
+  <div class="page-intro"><p class="eyebrow">Order {{ order.reference }}</p><h1>{{ order.event.name }}</h1><p class="text-secondary">Created {{ order.created_at|date:"j F Y · H:i" }}</p></div>
+  <div class="checkout-grid">
+    <section class="card checkout-summary">
+      <div class="d-flex justify-content-between gap-3"><h2>Tickets</h2><span class="badge text-bg-warning">{{ order.get_status_display }}</span></div>
+      {% for line in order.lines.all %}<div class="summary-row"><span>{% if line.line_type == 'seat' %}{{ line.seat.label }}{% else %}{{ line.ticket_category.name }} × {{ line.quantity }}{% endif %}</span><strong>M {{ line.line_total_minor|floatformat:2 }}</strong></div>{% endfor %}
+      <div class="summary-rule"></div><div class="summary-row"><span>Subtotal</span><strong>M {{ order.subtotal_minor|floatformat:2 }}</strong></div><div class="summary-row"><span>Service fee</span><strong>M {{ order.fee_minor|floatformat:2 }}</strong></div><div class="summary-total"><span>Total</span><strong>M {{ order.total_minor|floatformat:2 }}</strong></div>
+    </section>
+    <aside class="card checkout-form">
+      <p class="eyebrow">Manual payment</p>
+      {% if order.status == 'pending' %}
+        <h2>Pay the organiser</h2>
+        <p class="text-secondary">Send <strong>M {{ order.total_minor|floatformat:2 }}</strong> to the organiser’s number or merchant account, then upload your proof.</p>
+        {% if payment_methods %}<div class="alert alert-info"><strong>Pay using one of these destinations:</strong>{% for method in payment_methods %}<div class="mt-2"><strong>{{ method.get_provider_display }} · {{ method.label }}</strong><br><span class="font-monospace">{{ method.account_number }}</span>{% if method.instructions %}<br><small>{{ method.instructions }}</small>{% endif %}</div>{% endfor %}</div>{% elif order.event.organisation.payment_number %}<div class="alert alert-info"><strong>Payment number:</strong> {{ order.event.organisation.payment_number }}</div>{% else %}<div class="alert alert-warning">The organiser has not added a payment destination yet. Contact support.</div>{% endif %}
+        {% if pending_over_24h %}<div class="alert alert-warning">This order has been pending for more than 24 hours. Please <a href="mailto:{{ support_email }}?subject=Payment%20support%20{{ order.reference }}">contact support</a> and include order {{ order.reference }}.</div>{% endif %}
+        <form method="post" enctype="multipart/form-data" novalidate>{% csrf_token %}
+          {% for field in payment_form %}<div class="mb-3"><label class="form-label" for="{{ field.id_for_label }}">{{ field.label }}</label>{{ field }}{% for error in field.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}</div>{% endfor %}
+          <p class="form-text">Upload a clear JPG or PNG screenshot, up to 5 MB. Tickets are issued only after organiser approval.</p>
+          <button class="btn btn-primary w-100" type="submit">Submit payment proof</button>
+        </form>
+        <form method="post" action="{% url 'orders:order-cancel' order.id %}" style="display:inline;">
+          {% csrf_token %}
+          <button class="btn btn-link text-danger mt-2" type="submit" onclick="return confirm('Are you sure you want to cancel this order?');">Cancel order</button>
+        </form>
+      {% elif order.status == 'paid' %}
+        <h2>Payment confirmed</h2><p class="text-success">Your payment was approved and your tickets have been issued.</p>
+      {% else %}
+        <h2>Payment not completed</h2><p class="text-secondary">This order is {{ order.get_status_display|lower }}. Return to the event to start a new order.</p>
+      {% endif %}
+      <a class="btn btn-outline-secondary mt-3" href="{% url 'public-event-detail' order.event.id %}">Return to event</a>
+    </aside>
+  </div>
+</div>
+{% endblock %}

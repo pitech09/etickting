@@ -13,6 +13,8 @@ Requires-Dist: dj-database-url<3,>=2.3
 Requires-Dist: python-dotenv<2,>=1.0
 Requires-Dist: uvicorn[standard]<1,>=0.32
 Requires-Dist: cryptography<47,>=43
+Requires-Dist: qrcode[pil]<9,>=8
+Requires-Dist: Pillow<13,>=10
 Provides-Extra: dev
 Requires-Dist: pytest>=8.3; extra == "dev"
 Requires-Dist: pytest-django>=4.9; extra == "dev"

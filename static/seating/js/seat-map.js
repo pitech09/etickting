@@ -15,15 +15,14 @@
   const checkoutBtn = document.getElementById("checkout-btn");
 
   const selectedSeatIds = new Set();
-  const SELECTION_PRICE_MINOR = 10000; // M100.00 placeholder - real pricing comes from ticket categories
+  const SELECTION_PRICE_MINOR = Number(window.SEAT_PRICE_MINOR || 0);
 
   // Map status to CSS class
-  function statusClass(status, isAvailable) {
-    if (!isAvailable) {
-      if (status === "blocked") return "seat-blocked";
-      if (status === "unavailable") return "seat-unavailable";
-      return "seat-unavailable";
-    }
+  // Uses seat.status from the model (available, blocked, unavailable)
+  // Falls back to "unavailable" for any unknown status
+  function statusClass(status) {
+    if (status === "blocked") return "seat-blocked";
+    if (status === "unavailable") return "seat-unavailable";
     return "seat-available";
   }
 
@@ -66,7 +65,7 @@
         rows[rowName].forEach((seat) => {
           const seatBtn = document.createElement("button");
           seatBtn.type = "button";
-          seatBtn.className = `seat ${statusClass(seat.status, seat.is_available)} ${selectedSeatIds.has(seat.id) ? "seat-selected" : ""}`;
+          seatBtn.className = `seat ${statusClass(seat.status)} ${selectedSeatIds.has(seat.id) ? "seat-selected" : ""}`;
           seatBtn.dataset.seatId = seat.id;
           seatBtn.dataset.label = seat.label;
           seatBtn.dataset.status = seat.status;
@@ -96,6 +95,9 @@
   }
 
   function toggleSeat(seatId, seatLabel) {
+    if (!selectedSeatIds.has(seatId) && selectedSeatIds.size >= 1) {
+      selectedSeatIds.clear();
+    }
     if (selectedSeatIds.has(seatId)) {
       selectedSeatIds.delete(seatId);
     } else {
@@ -135,6 +137,6 @@
     sessionStorage.setItem("selected_seats", JSON.stringify(Array.from(selectedSeatIds)));
     // Navigate to ticket category selection / checkout
     // The actual URL will be wired up in Phase 4 (Orders)
-    window.location.href = `/tickets/events/${EVENT_ID}/checkout/?seats=${encodeURIComponent(Array.from(selectedSeatIds).join(","))}`;
+    window.location.href = `/orders/${EVENT_ID}/create/?seat=${encodeURIComponent(Array.from(selectedSeatIds)[0])}`;
   });
 })();

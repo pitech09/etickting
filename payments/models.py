@@ -24,12 +24,21 @@ class Payment(models.Model):
     class Provider(models.TextChoices):
         MPESA = "mpesa", "M-Pesa"
         ECOCASH = "ecocash", "EcoCash"
+        BANK = "bank", "Bank transfer"
+        OTHER = "other", "Other"
         SANDBOX = "sandbox", "Sandbox (development)"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     order = models.ForeignKey(
         "orders.Order",
         on_delete=models.PROTECT,
+        related_name="payments",
+    )
+    payment_method = models.ForeignKey(
+        "organisations.OrganisationPaymentMethod",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name="payments",
     )
     provider = models.CharField(max_length=20, choices=Provider.choices)
@@ -45,6 +54,22 @@ class Payment(models.Model):
         blank=True,
         help_text="Transaction reference from the payment provider",
     )
+    proof_image = models.ImageField(
+        upload_to="payment-proofs/%Y/%m/",
+        blank=True,
+        null=True,
+        help_text="Customer payment screenshot for manual review",
+    )
+    submitted_at = models.DateTimeField(null=True, blank=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="reviewed_payments",
+    )
+    review_note = models.TextField(blank=True)
     provider_response = models.JSONField(
         default=dict, blank=True, help_text="Raw provider response for audit"
     )

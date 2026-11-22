@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
@@ -12,7 +13,7 @@ def generate_ticket_reference():
     import secrets
     import string
 
-    alphabet = string.ascii_upcase + string.digits
+    alphabet = string.ascii_uppercase + string.digits
     return "".join(secrets.choice(alphabet) for _ in range(32))
 
 
@@ -132,6 +133,10 @@ class TicketCategory(models.Model):
         return f"{self.event.name} — {self.name}"
 
     @property
+    def price_maloti(self):
+        return Decimal(self.price_minor) / Decimal("100")
+
+    @property
     def sold_count(self):
         """Number of issued (non-cancelled) tickets in this category."""
         return Ticket.objects.filter(
@@ -142,7 +147,15 @@ class TicketCategory(models.Model):
 
     @property
     def available_count(self):
-        return max(0, self.total_quantity - self.sold_count)
+        from django.utils import timezone
+        from orders.models import InventoryHold
+
+        held = InventoryHold.objects.filter(
+            ticket_category=self,
+            status=InventoryHold.Status.ACTIVE,
+            expires_at__gt=timezone.now(),
+        ).aggregate(total=models.Sum("quantity"))["total"] or 0
+        return max(0, self.total_quantity - self.sold_count - held)
 
     @property
     def is_sold_out(self):
@@ -169,6 +182,8 @@ class Ticket(models.Model):
     credential_hash = models.CharField(
         max_length=64, unique=True, editable=False, default=""
     )
+    key_id = models.CharField(max_length=80, blank=True, null=True)
+    state = models.CharField(max_length=20, choices=Status.choices, default=Status.ISSUED)
     event = models.ForeignKey(Event, on_delete=models.PROTECT, related_name="tickets")
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="tickets")
     ticket_category = models.ForeignKey(
@@ -194,6 +209,7 @@ class Ticket(models.Model):
     complimentary_authorized_at = models.DateTimeField(null=True, blank=True)
     issued_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
+    order = models.ForeignKey("orders.Order", null=True, blank=True, on_delete=models.PROTECT, related_name="tickets")
 
     def can_be_issued(self):
         return bool(self.payment_verified_at or self.complimentary_authorized_at)
@@ -239,17 +255,7 @@ class Ticket(models.Model):
 
     def is_valid(self):
         """Check if the ticket is valid for admission."""
-        if self.status in self.Status.choices_as_values_ref():
-            return False
-        if self.status == self.Status.ADMITTED:
-            return False
-        if self.status == self.Status.CANCELLED:
-            return False
-        if self.status == self.Status.REFUNDED:
-            return False
-        if self.status == self.Status.REVOKED:
-            return False
-        return True
+        return self.status == self.Status.ISSUED
 
     @property
     def admission_status_label(self):
@@ -293,25 +299,23 @@ class TicketCredential(models.Model):
     to reverse-engineer.
     """
 
-    class Status(models.TextChoices):
-        ACTIVE = "active", "Active"
-        USED = "used", "Used"
+    class State(models.TextChoices):
+        CURRENT = "current", "Current"
         REVOKED = "revoked", "Revoked"
-        EXPORTED = "exported", "Exported"
+        TRANSFERRED = "transferred", "Transferred"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    ticket = models.OneToOneField(
-        Ticket, on_delete=models.CASCADE, related_name="credential"
-    )
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="credentials")
     credential_hash = models.CharField(
         max_length=64,
         unique=True,
         help_text="SHA-256 hash of the credential for quick lookup",
     )
-    status = models.CharField(
-        max_length=20, choices=Status.choices, default=Status.ACTIVE
-    )
-    created_at = models.DateTimeField(auto_now_add=True)
+    key_id = models.CharField(max_length=80)
+    state = models.CharField(max_length=20, choices=State.choices, default=State.CURRENT)
+    encrypted_credential = models.TextField(blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    issued_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
         verbose_name = "Ticket Credential"
@@ -329,53 +333,52 @@ class TicketOwnershipHistory(models.Model):
     purchaser_id (or owner_id depending on workflow).
     """
 
-    class TransferType(models.TextChoices):
-        INITIAL_PURCHASE = "initial_purchase", "Initial Purchase"
-        RESALE = "resale", "Resale"
-        TRANSFER = "transfer", "Transfer"
-        REFUND = "refund", "Refund"
-
-    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
-    ticket = models.ForeignKey(
-        Ticket, on_delete=models.CASCADE, related_name="ownership_history"
-    )
-    previous_holder = models.ForeignKey(
+    ticket = models.ForeignKey(Ticket, on_delete=models.CASCADE, related_name="ownership_history")
+    previous_owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
         null=True,
         blank=True,
-        on_delete=models.SET_NULL,
-        related_name="ownership_transfers_out",
+        on_delete=models.PROTECT,
+        related_name="outgoing_ticket_transfers",
     )
-    new_holder = models.ForeignKey(
+    new_owner = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        null=True,
-        blank=True,
-        on_delete=models.SET_NULL,
-        related_name="ownership_transfers_in",
+        on_delete=models.PROTECT,
+        related_name="incoming_ticket_transfers",
     )
-    transfer_type = models.CharField(
-        max_length=20, choices=TransferType.choices
-    )
-    transfer_price_minor = models.IntegerField(
-        null=True,
-        blank=True,
-        help_text="Price in minor units if this was a resale transfer",
-    )
-    transfer_timestamp = models.DateTimeField(auto_now_add=True)
-    reason = models.CharField(max_length=200, blank=True)
+    reason = models.CharField(max_length=40, default="transfer")
+    created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:
-        ordering = ("-transfer_timestamp",)
+        ordering = ("-created_at",)
         verbose_name = "Ticket Ownership History"
         verbose_name_plural = "Ticket Ownership Histories"
 
     def __str__(self):
-        return f"Ownership transfer of {self.ticket.reference} at {self.transfer_timestamp}"
+        return f"Ownership transfer of {self.ticket.reference} at {self.created_at}"
+class ScannerDevice(models.Model):
+    """A physical or logical scanner device used to validate tickets."""
+
+    class Meta:
+        verbose_name = "Scanner Device"
+        verbose_name_plural = "Scanner Devices"
+
     device_id = models.CharField(max_length=100, unique=True)
-    event = models.ForeignKey(Event, on_delete=models.CASCADE, related_name="scanner_devices")
-    user = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="scanner_devices")
     active = models.BooleanField(default=True)
-    last_seen_at = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(blank=True, null=True)
+    event = models.ForeignKey(
+        Event,
+        on_delete=models.CASCADE,
+        related_name="scanner_devices",
+    )
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="scanner_devices_owned",
+    )
+
+    def __str__(self):
+        return f"Scanner {self.device_id}"
 
 
 class ScanAttempt(models.Model):
@@ -400,3 +403,74 @@ class Admission(models.Model):
     admitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
     admitted_at = models.DateTimeField(auto_now_add=True)
     reentry_count = models.PositiveIntegerField(default=0)
+
+
+class OfflineScanBatch(models.Model):
+    class Status(models.TextChoices):
+        RECEIVED = "received", "Received"
+        RECONCILED = "reconciled", "Reconciled"
+        REJECTED = "rejected", "Rejected"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event = models.ForeignKey(Event, on_delete=models.PROTECT, related_name="offline_scan_batches")
+    device = models.ForeignKey(ScannerDevice, on_delete=models.PROTECT, related_name="offline_batches")
+    uploaded_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.RECEIVED)
+    received_at = models.DateTimeField(auto_now_add=True)
+    reconciled_at = models.DateTimeField(null=True, blank=True)
+
+
+class OfflineScanRecord(models.Model):
+    batch = models.ForeignKey(OfflineScanBatch, on_delete=models.CASCADE, related_name="records")
+    credential = models.TextField()
+    signature_valid = models.BooleanField(default=False)
+    result = models.CharField(max_length=40, default="pending")
+    scanned_at = models.DateTimeField()
+
+
+class SigningKey(models.Model):
+    """A signing key for ticket encryption and verification."""
+
+    class Meta:
+        verbose_name = "Signing Key"
+        verbose_name_plural = "Signing Keys"
+
+    key_id = models.CharField(max_length=80, primary_key=True, serialize=False)
+    public_key = models.TextField()
+    activated_at = models.DateTimeField(auto_now_add=True)
+    retired_at = models.DateTimeField(blank=True, null=True)
+
+    def __str__(self):
+        return self.key_id
+
+
+class ResaleListing(models.Model):
+    """A listing for resale of a ticket."""
+
+    class Meta:
+        verbose_name = "Resale Listing"
+        verbose_name_plural = "Resale Listings"
+
+    class Status(models.TextChoices):
+        OPEN = "open", "Open"
+        PENDING = "pending", "Pending payment"
+        SOLD = "sold", "Sold"
+        CANCELLED = "cancelled", "Cancelled"
+
+    ticket = models.OneToOneField(
+        Ticket,
+        on_delete=models.PROTECT,
+        related_name="resale_listing",
+    )
+    seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="ticket_listings")
+    buyer = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="ticket_purchases")
+    price_minor = models.PositiveIntegerField(
+        help_text="Price in minor currency units (e.g. sente for Maloti)"
+    )
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
+    payment_verified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Resale listing for {self.ticket.reference}"

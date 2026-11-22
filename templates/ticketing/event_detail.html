@@ -18,6 +18,7 @@
     </form>
     {% endif %}
     <a href="{% url 'ticketing:ticket-scanner-page' event.id %}" class="btn btn-primary">Open scanner</a>
+    <a href="{% url 'ticketing:inventory-dashboard' event.id %}" class="btn btn-outline-primary">Live inventory</a>
   </div>
 </div>
 

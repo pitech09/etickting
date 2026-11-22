@@ -18,13 +18,17 @@ dependencies = [
     "python-dotenv>=1.0,<2",
     "uvicorn[standard]>=0.32,<1",
     "cryptography>=43,<47",
+    "qrcode[pil]>=8,<9",
+    "Pillow>=10,<13",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.3", "pytest-django>=4.9", "ruff>=0.8"]
+blockchain = ["web3>=7,<8"]
+ops = ["locust>=2.32,<3"]
 
 [tool.setuptools.packages.find]
-include = ["accounts*", "config*", "core*", "dashboard*", "organisations*", "ticketing*", "venues*"]
+include = ["accounts*", "attendees*", "audit*", "blockchain*", "config*", "core*", "dashboard*", "finance*", "notifications*", "organisations*", "orders*", "payments*", "seating*", "ticketing*", "venues*"]
 
 [tool.pytest.ini_options]
 DJANGO_SETTINGS_MODULE = "config.settings"

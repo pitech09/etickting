@@ -1,6 +1,11 @@
 accounts
+attendees
 config
 core
 dashboard
+orders
 organisations
+payments
+seating
 ticketing
+venues

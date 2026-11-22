@@ -28,7 +28,7 @@
           <tr>
             <td>{{ category.name }}</td>
             <td class="text-secondary small">{{ category.description|default:'-' }}</td>
-            <td>M {{ category.price_minor|floatformat:2 }}</td>
+            <td>M {{ category.price_maloti|floatformat:2 }}</td>
             <td>
               <span class="badge text-bg-{% if category.is_sold_out %}danger{% else %}primary{% endif %}">
                 {{ category.sold_count }} / {{ category.total_quantity }}

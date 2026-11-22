@@ -151,3 +151,28 @@ class OrderLine(models.Model):
     def save(self, *args, **kwargs):
         self.line_total_minor = self.unit_price_minor * self.quantity
         super().save(*args, **kwargs)
+
+
+class InventoryHold(models.Model):
+    """Short-lived hold for general-admission inventory during checkout."""
+
+    class Status(models.TextChoices):
+        ACTIVE = "active", "Active"
+        EXPIRED = "expired", "Expired"
+        RELEASED = "released", "Released"
+        CONVERTED = "converted", "Converted to tickets"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="inventory_holds")
+    ticket_category = models.ForeignKey("ticketing.TicketCategory", on_delete=models.PROTECT, related_name="inventory_holds")
+    quantity = models.PositiveIntegerField()
+    session_key = models.CharField(max_length=200, blank=True)
+    expires_at = models.DateTimeField()
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.ACTIVE)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(fields=("ticket_category", "status", "expires_at")),
+        ]

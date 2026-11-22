@@ -11,7 +11,7 @@ from django.utils import timezone
 
 from organisations.models import OrganisationMembership
 
-from .key_management import signing_keys, verification_keys
+from .key_management import decrypt_credential, encrypt_credential, signing_keys, verification_keys
 from .models import Admission, ResaleListing, ScanAttempt, ScannerDevice, Ticket, TicketCredential, TicketOwnershipHistory
 
 
@@ -37,7 +37,7 @@ def _credential_hash(credential):
     return hashlib.sha256(credential.encode()).hexdigest()
 
 
-def issue_ticket(*, event, owner, payment_verified=False, complimentary_authorized=False, attendee_name="", seat_label=""):
+def issue_ticket(*, event, owner, payment_verified=False, complimentary_authorized=False, attendee_name="", seat_label="", ticket_category=None, seat=None):
     keys = signing_keys()
     if not keys:
         raise ValidationError("Ticket signing is not configured")
@@ -47,11 +47,19 @@ def issue_ticket(*, event, owner, payment_verified=False, complimentary_authoriz
     with transaction.atomic():
         ticket = Ticket.objects.create(
             event=event, owner=owner, reference=secrets.token_urlsafe(12), attendee_name=attendee_name,
-            seat_label=seat_label, payment_verified_at=timezone.now() if payment_verified else None,
+            seat_label=seat_label or (seat.label if seat else ""), seat=seat, ticket_category=ticket_category,
+            payment_verified_at=timezone.now() if payment_verified else None,
             complimentary_authorized_at=timezone.now() if complimentary_authorized else None,
         )
         credential = _credential(ticket, key_id, private_key)
-        TicketCredential.objects.create(ticket=ticket, credential_hash=_credential_hash(credential), key_id=key_id)
+        ticket.credential_hash = _credential_hash(credential)
+        ticket.key_id = key_id
+        ticket.save(update_fields=["credential_hash", "key_id", "updated_at"])
+        TicketCredential.objects.create(ticket=ticket, credential_hash=_credential_hash(credential), key_id=key_id, encrypted_credential=encrypt_credential(credential))
+        from .realtime import publish_inventory_update
+        publish_inventory_update(event.id, [ticket.seat_id] if ticket.seat_id else None)
+    from notifications.services import deliver_ticket
+    deliver_ticket(ticket=ticket)
     return ticket, credential
 
 
@@ -102,12 +110,20 @@ def admit_ticket(*, credential, event, user, device_id):
         ScanAttempt.objects.create(ticket=ticket, event=event, scanner=user, device=device, result=ScanAttempt.Result.INVALID, reason=result)
         return ticket, result
     if hasattr(ticket, "admission"):
+        if event.admission_policy == "reentry":
+            admission = ticket.admission
+            admission.reentry_count += 1
+            admission.save(update_fields=["reentry_count"])
+            ScanAttempt.objects.create(ticket=ticket, event=event, scanner=user, device=device, result=ScanAttempt.Result.VALID, reason="reentry")
+            return ticket, "reentry"
         ScanAttempt.objects.create(ticket=ticket, event=event, scanner=user, device=device, result=ScanAttempt.Result.USED, reason="already admitted")
         return ticket, "used"
     Admission.objects.create(ticket=ticket, event=event, admitted_by=user)
     ticket.status = Ticket.Status.ADMITTED
     ticket.save(update_fields=["status", "updated_at"])
     ScanAttempt.objects.create(ticket=ticket, event=event, scanner=user, device=device, result=ScanAttempt.Result.VALID)
+    from .realtime import publish_inventory_update
+    publish_inventory_update(event.id, [ticket.seat_id] if ticket.seat_id else None)
     return ticket, "valid"
 
 
@@ -131,8 +147,18 @@ def transfer_ticket(*, ticket_id, current_owner, new_owner):
     TicketOwnershipHistory.objects.create(ticket=ticket, previous_owner=current_owner, new_owner=new_owner)
     key_id, private_key = next(iter(keys.items()))
     credential = _credential(ticket, key_id, private_key)
-    TicketCredential.objects.create(ticket=ticket, credential_hash=_credential_hash(credential), key_id=key_id)
+    ticket.credential_hash = _credential_hash(credential)
+    ticket.key_id = key_id
+    ticket.save(update_fields=["credential_hash", "key_id", "updated_at"])
+    TicketCredential.objects.create(ticket=ticket, credential_hash=_credential_hash(credential), key_id=key_id, encrypted_credential=encrypt_credential(credential))
     return ticket, credential
+
+
+def current_credential(ticket):
+    record = ticket.credentials.filter(state=TicketCredential.State.CURRENT).first()
+    if not record or not record.encrypted_credential:
+        return None
+    return decrypt_credential(record.encrypted_credential)
 
 
 @transaction.atomic

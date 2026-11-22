@@ -15,5 +15,14 @@ services:
         value: "false"
       - key: DJANGO_ALLOWED_HOSTS
         value: etickting.onrender.com
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: etickting-redis
+          property: connectionString
+  - type: redis
+    name: etickting-redis
+    plan: starter
+    maxmemoryPolicy: noeviction
 databases:
   - name: etickting-db

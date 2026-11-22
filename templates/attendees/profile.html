@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block title %}Attendee profile · eTickting{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-lg-7"><div class="page-intro"><p class="eyebrow mb-2">Your identity</p><h1 class="h2 mb-2">Attendee profile</h1><p class="text-secondary mb-0">Keep your details ready for ticket admission. Your photograph is private and only shown to authorised event staff.</p></div><form method="post" enctype="multipart/form-data" class="card card-body form-system">{% csrf_token %}{% include "components/form_errors.html" with form=form %}{% for field in form %}{% include "components/form_field.html" with field=field %}{% endfor %}<div class="form-actions"><span></span><button class="btn btn-primary" type="submit">Save profile</button></div></form></div></div>
+{% endblock %}

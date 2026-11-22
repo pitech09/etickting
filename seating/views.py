@@ -10,9 +10,14 @@ from django.views.decorators.http import require_GET, require_POST
 from django.views.generic import CreateView, DetailView, ListView, UpdateView
 
 from organisations.models import OrganisationMembership
+from dashboard.views import customer_required
 
 from .models import EventSeating, SeatingRow, SeatingSection, Seat, SeatReservation
-from .services import convert_reservation_to_allocation, reserve_seats
+from .services import (
+    convert_reservation_to_allocation,
+    get_event_seat_availability,
+    reserve_seats,
+)
 
 
 class _RequiresOrganisationEventAccess(LoginRequiredMixin):
@@ -143,7 +148,7 @@ class SeatUpdateView(_RequiresOrganisationEventAccess, UpdateView):
         )
 
 
-@login_required
+@customer_required
 @require_GET
 def event_seating_map(request, event_id):
     """Customer-facing seating map for seat selection."""
@@ -195,7 +200,7 @@ def event_seating_map(request, event_id):
     )
 
 
-@login_required
+@customer_required
 @require_GET
 def event_seat_map(request, event_id):
     """Customer-facing seating map with real-time availability."""
@@ -224,6 +229,7 @@ def event_seat_map(request, event_id):
                     "row": row.name,
                     "number": seat.number,
                     "status": seat.status,
+                    "is_available": seat.status == Seat.Status.AVAILABLE,
                     "is_accessible": seat.is_accessible,
                     "is_restricted_view": seat.is_restricted_view,
                 }
@@ -233,6 +239,7 @@ def event_seat_map(request, event_id):
                 ).first()
                 if active_res:
                     seat_info["status"] = "reserved"
+                    seat_info["is_available"] = False
                     seat_info["reservation_expires_at"] = active_res.expires_at.isoformat()
                 seats_data.append(seat_info)
 
@@ -246,11 +253,12 @@ def event_seat_map(request, event_id):
             "sections": sections,
             "seat_data": seats_data,
             "availability": availability,
+            "ticket_price_minor": event.ticket_categories.order_by("price_minor").values_list("price_minor", flat=True).first() or 0,
         },
     )
 
 
-@login_required
+@customer_required
 @require_POST
 def reserve_customer_seats(request, event_id):
     """API endpoint to reserve seats during checkout."""

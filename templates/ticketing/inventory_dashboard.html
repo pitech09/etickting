@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Live inventory · {{ event.name }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-start gap-3 mb-4"><div><p class="text-uppercase text-primary small fw-semibold mb-2">Organiser operations</p><h1 class="h2">Live inventory</h1><p class="text-secondary mb-0">{{ event.name }} · authoritative database snapshot</p></div><a class="btn btn-outline-secondary" href="{% url 'ticketing:event-detail' event.id %}">Event details</a></div>
+<div id="connection" class="alert alert-info py-2" role="status">Connecting to live updates…</div>
+<section aria-labelledby="metric-heading"><h2 id="metric-heading" class="visually-hidden">Inventory metrics</h2><div id="metrics" class="row g-3 mb-4"></div></section>
+<section class="card shadow-sm p-4" aria-labelledby="map-heading"><div class="d-flex justify-content-between align-items-center mb-3"><h2 id="map-heading" class="h4 mb-0">Seat occupancy</h2><div class="small text-secondary">Green available · Blue sold · Yellow reserved · Red blocked · Grey unavailable</div></div><div id="seat-map" class="inventory-seat-map" aria-live="polite"></div><div id="ga-summary" class="mt-4"></div></section>
+{{ snapshot|json_script:"inventory-snapshot" }}
+<script>
+const initialSnapshot = JSON.parse(document.getElementById('inventory-snapshot').textContent);
+const eventId = '{{ event.id }}';
+const dataUrl = '{% url "ticketing:inventory-data" event.id %}';
+const metrics = document.getElementById('metrics'); const seatMap = document.getElementById('seat-map'); const gaSummary = document.getElementById('ga-summary'); const connection = document.getElementById('connection');
+const esc = (v) => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+function render(snapshot) {
+  const m = snapshot.seating?.metrics;
+  const cards = m ? [['Total seats',m.total],['Sold',m.sold],['Reserved',m.reserved],['Available',m.available],['Occupancy',`${m.occupancy_percentage}%`],['Blocked / unavailable',`${m.blocked} / ${m.unavailable}`]] : [];
+  metrics.innerHTML = cards.map(([label,value]) => `<div class="col-6 col-lg-2"><div class="card shadow-sm h-100 p-3"><div class="small text-secondary">${label}</div><div class="fs-4 fw-bold">${value}</div></div></div>`).join('');
+  if (snapshot.seating) { seatMap.innerHTML = snapshot.seating.seats.map(seat => `<span class="inventory-seat seat-${esc(seat.state)}" title="${esc(seat.section)} · ${esc(seat.row)} · ${esc(seat.label)} · ${esc(seat.state)}" aria-label="${esc(seat.label)}, ${esc(seat.state)}">${esc(seat.label)}</span>`).join(''); } else { seatMap.innerHTML = '<div class="alert alert-secondary">This event does not have reserved seating.</div>'; }
+  gaSummary.innerHTML = snapshot.general_admission.length ? `<h3 class="h5">General admission sales</h3><div class="table-responsive"><table class="table align-middle"><thead><tr><th>Category</th><th>Sold</th><th>Available</th><th>Revenue</th></tr></thead><tbody>${snapshot.general_admission.map(c => `<tr><td>${esc(c.name)}</td><td>${c.sold} / ${c.total}</td><td>${c.available}</td><td>M${(c.revenue_minor / 100).toFixed(2)}</td></tr>`).join('')}</tbody></table></div>` : '';
+}
+async function refresh() { try { const response = await fetch(dataUrl, {headers:{'Accept':'application/json'}}); if (!response.ok) throw new Error(); render(await response.json()); connection.className='alert alert-success py-2'; connection.textContent='Live data connected'; } catch (_) { connection.className='alert alert-warning py-2'; connection.textContent='Live updates unavailable; retrying with polling'; } }
+render(initialSnapshot);
+let socket; try { const scheme = location.protocol === 'https:' ? 'wss' : 'ws'; socket = new WebSocket(`${scheme}://${location.host}/ws/events/${eventId}/inventory/`); socket.onopen = () => { connection.className='alert alert-success py-2'; connection.textContent='Live updates connected'; }; socket.onmessage = () => refresh(); socket.onclose = () => { connection.className='alert alert-warning py-2'; connection.textContent='Live updates unavailable; polling is active'; }; } catch (_) {}
+setInterval(refresh, 10000);
+</script>
+<style>.inventory-seat-map{display:flex;flex-wrap:wrap;gap:.45rem}.inventory-seat{display:inline-flex;align-items:center;justify-content:center;min-width:3.2rem;padding:.45rem .3rem;border-radius:.45rem;color:#fff;font-size:.72rem;font-weight:600}.seat-available{background:#198754}.seat-sold{background:#0d6efd}.seat-reserved{background:#ffc107;color:#172033}.seat-blocked{background:#dc3545}.seat-unavailable{background:#6c757d}</style>
+{% endblock %}

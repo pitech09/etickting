@@ -1,0 +1,4 @@
+<div class="form-actions{% if class_name %} {{ class_name }}{% endif %}">
+  {% if cancel_url %}<a class="btn btn-outline-secondary" href="{{ cancel_url }}">{{ cancel_label|default:"Cancel" }}</a>{% endif %}
+  <button class="btn btn-primary" type="submit">{{ submit_label|default:"Save" }}</button>
+</div>

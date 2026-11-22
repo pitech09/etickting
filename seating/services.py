@@ -78,6 +78,9 @@ def reserve_seats(*, event, seat_ids, session_key, reservation_minutes=None):
             )
             reservations.append(reservation)
 
+        from ticketing.realtime import publish_inventory_update
+        publish_inventory_update(event.id, seat_ids)
+
     return reservations, errors
 
 
@@ -92,14 +95,22 @@ def release_expired_reservations():
         expires_at__lte=timezone.now(),
     )
     count = expired.update(status=SeatReservation.Status.EXPIRED)
+    for event_id in expired.values_list("event_id", flat=True).distinct():
+        from ticketing.realtime import publish_inventory_update
+        publish_inventory_update(event_id)
     return count
 
 
 def release_reservations_for_session(*, session_key):
     """Release all active reservations held by a checkout session."""
+    event_ids = list(SeatReservation.objects.filter(session_key=session_key, status=SeatReservation.Status.ACTIVE).values_list("event_id", flat=True).distinct())
     released = SeatReservation.objects.filter(
         session_key=session_key, status=SeatReservation.Status.ACTIVE
     ).update(status=SeatReservation.Status.RELEASED)
+    # The session may contain reservations for multiple events; publish a safe refresh for each.
+    for event_id in event_ids:
+        from ticketing.realtime import publish_inventory_update
+        publish_inventory_update(event_id)
     return released
 
 
@@ -130,6 +141,9 @@ def convert_reservation_to_allocation(*, reservation, ticket):
         ticket.seat = seat
         ticket.seat_label = seat.label
         ticket.save(update_fields=["seat", "seat_label", "updated_at"])
+
+        from ticketing.realtime import publish_inventory_update
+        publish_inventory_update(ticket.event_id, [seat.id])
 
         return allocation
 

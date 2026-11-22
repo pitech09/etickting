@@ -8,6 +8,8 @@ dj-database-url<3,>=2.3
 python-dotenv<2,>=1.0
 uvicorn[standard]<1,>=0.32
 cryptography<47,>=43
+qrcode[pil]<9,>=8
+Pillow<13,>=10
 
 [dev]
 pytest>=8.3

@@ -26,6 +26,12 @@ INSTALLED_APPS = [
     "seating",
     "ticketing",
     "orders",
+    "payments",
+    "attendees",
+    "finance",
+    "notifications",
+    "blockchain",
+    "audit",
     "core",
     "dashboard",
 ]
@@ -68,6 +74,7 @@ USE_I18N = True
 USE_TZ = True
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
+STATICFILES_DIRS = [BASE_DIR / "static"]
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -75,11 +82,17 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
+SUPPORT_EMAIL = os.getenv("ETICKTING_SUPPORT_EMAIL", "support@etickting.local")
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 TICKETING_SIGNING_KEYS = os.getenv("TICKETING_SIGNING_KEYS", "")
 TICKETING_VERIFY_KEYS = os.getenv("TICKETING_VERIFY_KEYS", "")
 TICKETING_PUBLIC_VERIFY_RATE_LIMIT = int(os.getenv("TICKETING_PUBLIC_VERIFY_RATE_LIMIT", "30"))
 TICKETING_SCAN_RATE_LIMIT = int(os.getenv("TICKETING_SCAN_RATE_LIMIT", "120"))
+TICKETING_HOLD_MINUTES = int(os.getenv("TICKETING_HOLD_MINUTES", "10"))
+TICKETING_CREDENTIAL_ENCRYPTION_KEY = os.getenv("TICKETING_CREDENTIAL_ENCRYPTION_KEY", "")
+BLOCKCHAIN_RPC_URL = os.getenv("BLOCKCHAIN_RPC_URL", "")
+BLOCKCHAIN_CONTRACT_ADDRESS = os.getenv("BLOCKCHAIN_CONTRACT_ADDRESS", "")
+BLOCKCHAIN_PRIVATE_KEY = os.getenv("BLOCKCHAIN_PRIVATE_KEY", "")
 CHANNEL_LAYERS = {"default": {"BACKEND": "channels_redis.core.RedisChannelLayer", "CONFIG": {"hosts": [REDIS_URL]}}}
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL

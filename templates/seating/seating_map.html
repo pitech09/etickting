@@ -1,11 +1,11 @@
-{% extends "base.html" %}{% block title %}Seat map · {{ event.name }} · eTickting{% endblock %}{% block content %}
+{% extends "base.html" %}{% load static %}{% block title %}Seat map · {{ event.name }} · eTickting{% endblock %}{% block content %}
 <div class="d-flex justify-content-between align-items-start mb-4">
   <div>
     <p class="text-uppercase text-primary small fw-semibold mb-2">Select your seats</p>
     <h1 class="display-6 fw-bold">{{ event.name }}</h1>
     <p class="text-secondary small mb-0">{{ event.starts_at|date:"j M Y · H:i" }} · {{ event.venue.name }}</p>
   </div>
-  <a href="{% url 'ticketing:event-list' %}" class="btn btn-outline-secondary">Back to events</a>
+  <a href="{% url 'public-event-detail' event.id %}" class="btn btn-outline-secondary">Back to event</a>
 </div>
 
 <div class="row g-4">

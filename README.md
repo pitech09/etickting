@@ -11,6 +11,13 @@ Secure, Lesotho-focused event ticketing platform built with Django. Development 
 - PostgreSQL-ready configuration with SQLite fallback for local development.
 - Redis, Channels and Celery configuration ready for later phases; no payment or real-time feature is represented as operational yet.
 - Signed ticket credentials with Ed25519 key rotation, server-side verification, atomic admission, scanner devices, audit scans, public limited verification, and payment-gated resale transfer primitives.
+- Phase 5 customer wallet, encrypted credential delivery, QR image downloads, attendee profiles and owner-controlled attendee photographs.
+- Phase 6 organiser inventory dashboard with general-admission metrics, reserved-seat occupancy, authenticated WebSockets and polling fallback.
+- Phase 7 admission/re-entry and explicit offline scan reconciliation records.
+- Phase 8 controlled resale marketplace UI and transfer-safe credential invalidation.
+- Phase 9 in-app notifications and balanced finance ledger/reporting foundations.
+- Phase 10 blockchain proof boundary without pretending external chain activity is live.
+- Production operations: `/health/ready/`, Redis readiness, offline reconciliation, sandbox payment gating, blockchain fail-closed checks, security checklist and Locust load-test starter.
 
 ## Run locally
 
