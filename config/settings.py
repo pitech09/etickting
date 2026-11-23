@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 
 import dj_database_url
+from django.core.exceptions import ImproperlyConfigured
 from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -60,7 +61,15 @@ TEMPLATES = [{
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-DATABASES = {"default": dj_database_url.config(default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}", conn_max_age=60)}
+DATABASE_SSL_REQUIRE = os.getenv("DATABASE_SSL_REQUIRE", "false").lower() == "true"
+
+DATABASES = {
+    "default": dj_database_url.config(
+        default=f"sqlite:///{BASE_DIR / 'db.sqlite3'}",
+        conn_max_age=int(os.getenv("DATABASE_CONN_MAX_AGE", "60")),
+        ssl_require=DATABASE_SSL_REQUIRE,
+    )
+}
 
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
@@ -78,6 +87,45 @@ STATICFILES_DIRS = [BASE_DIR / "static"]
 MEDIA_URL = "media/"
 MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+USE_OBJECT_STORAGE = os.getenv("USE_OBJECT_STORAGE", "false").lower() == "true"
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage"},
+}
+if USE_OBJECT_STORAGE:
+    object_storage_bucket = os.getenv("OBJECT_STORAGE_BUCKET", "").strip()
+    object_storage_access_key = os.getenv("OBJECT_STORAGE_ACCESS_KEY", "").strip()
+    object_storage_secret_key = os.getenv("OBJECT_STORAGE_SECRET_KEY", "").strip()
+    missing_object_storage = [
+        name
+        for name, value in {
+            "OBJECT_STORAGE_BUCKET": object_storage_bucket,
+            "OBJECT_STORAGE_ACCESS_KEY": object_storage_access_key,
+            "OBJECT_STORAGE_SECRET_KEY": object_storage_secret_key,
+        }.items()
+        if not value
+    ]
+    if missing_object_storage:
+        raise ImproperlyConfigured(
+            "Object storage is enabled but missing: " + ", ".join(missing_object_storage)
+        )
+    object_storage_options = {
+        "bucket_name": object_storage_bucket,
+        "access_key": object_storage_access_key,
+        "secret_key": object_storage_secret_key,
+        "endpoint_url": os.getenv("OBJECT_STORAGE_ENDPOINT_URL", "").strip() or None,
+        "region_name": os.getenv("OBJECT_STORAGE_REGION", "").strip() or None,
+        "file_overwrite": False,
+        "querystring_auth": os.getenv("OBJECT_STORAGE_QUERYSTRING_AUTH", "true").lower() == "true",
+    }
+    custom_domain = os.getenv("OBJECT_STORAGE_CUSTOM_DOMAIN", "").strip()
+    if custom_domain:
+        object_storage_options["custom_domain"] = custom_domain
+    STORAGES["default"] = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": object_storage_options,
+    }
 
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
@@ -106,6 +154,7 @@ CACHES = {
 
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SESSION_COOKIE_HTTPONLY = True
 CSRF_COOKIE_HTTPONLY = True
 if not DEBUG:

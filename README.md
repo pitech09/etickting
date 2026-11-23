@@ -35,6 +35,10 @@ Visit http://127.0.0.1:8000/accounts/register/.
 
 For production, set a strong `DJANGO_SECRET_KEY`, `DJANGO_DEBUG=false`, `DJANGO_ALLOWED_HOSTS`, `CSRF_TRUSTED_ORIGINS`, and a PostgreSQL `DATABASE_URL`. Redis is required before enabling Channels/Celery workers.
 
+### Production database and uploaded images
+
+Set `DATABASE_URL` to the managed PostgreSQL connection string. PostgreSQL stores application records and image metadata; uploaded image bytes should use S3-compatible object storage so they survive web-service redeploys. Enable it with `USE_OBJECT_STORAGE=true` and provide `OBJECT_STORAGE_BUCKET`, `OBJECT_STORAGE_ACCESS_KEY`, `OBJECT_STORAGE_SECRET_KEY`, and the provider region or endpoint. Keep `USE_OBJECT_STORAGE=false` for local filesystem media.
+
 Ticket signing keys are deployment secrets, not database records or source files. `TICKETING_SIGNING_KEYS` contains active private keys as JSON; `TICKETING_VERIFY_KEYS` can retain public keys for rotated credentials. Never put either value in Git. Generate keys with `Ed25519PrivateKey.generate()` and store the URL-safe base64 raw private key in the deployment secret manager.
 
 ## Architecture and security notes

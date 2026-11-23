@@ -20,6 +20,7 @@ dependencies = [
     "cryptography>=43,<47",
     "qrcode[pil]>=8,<9",
     "Pillow>=10,<13",
+    "django-storages[s3]>=1.14,<2",
 ]
 
 [project.optional-dependencies]

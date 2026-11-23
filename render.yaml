@@ -2,8 +2,9 @@ services:
   - type: web
     name: etickting
     runtime: python
-    buildCommand: pip install . && python manage.py collectstatic --noinput && python manage.py migrate --noinput
-    startCommand: uvicorn config.asgi:application --host 0.0.0.0 --port $PORT
+    buildCommand: pip install . && python manage.py collectstatic --noinput
+    startCommand: python manage.py migrate --noinput && uvicorn config.asgi:application --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health/ready/
     envVars:
       - key: DATABASE_URL
         fromDatabase:
@@ -15,11 +16,37 @@ services:
         value: "false"
       - key: DJANGO_ALLOWED_HOSTS
         value: etickting.onrender.com
+      - key: CSRF_TRUSTED_ORIGINS
+        value: https://etickting.onrender.com
       - key: REDIS_URL
         fromService:
           type: redis
           name: etickting-redis
           property: connectionString
+      - key: DATABASE_SSL_REQUIRE
+        value: "true"
+      - key: USE_OBJECT_STORAGE
+        value: "true"
+      - key: OBJECT_STORAGE_BUCKET
+        sync: false
+      - key: OBJECT_STORAGE_REGION
+        sync: false
+      - key: OBJECT_STORAGE_ENDPOINT_URL
+        sync: false
+      - key: OBJECT_STORAGE_ACCESS_KEY
+        sync: false
+      - key: OBJECT_STORAGE_SECRET_KEY
+        sync: false
+      - key: OBJECT_STORAGE_CUSTOM_DOMAIN
+        sync: false
+      - key: OBJECT_STORAGE_QUERYSTRING_AUTH
+        value: "true"
+      - key: TICKETING_SIGNING_KEYS
+        sync: false
+      - key: TICKETING_VERIFY_KEYS
+        sync: false
+      - key: TICKETING_CREDENTIAL_ENCRYPTION_KEY
+        sync: false
   - type: redis
     name: etickting-redis
     plan: starter

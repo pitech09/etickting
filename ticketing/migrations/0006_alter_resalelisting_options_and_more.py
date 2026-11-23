@@ -6,6 +6,32 @@ from django.conf import settings
 from django.db import migrations, models
 
 
+def convert_ticketcredential_ids(apps, schema_editor):
+    model = apps.get_model("ticketing", "TicketCredential")
+    old_field = model._meta.get_field("id")
+    new_field = models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True)
+    new_field.set_attributes_from_name("id")
+    new_field.model = model
+
+    if schema_editor.connection.vendor == "postgresql":
+        # PostgreSQL cannot cast bigint directly to uuid. The credential id
+        # is not referenced by another table, so give existing rows stable
+        # UUID values derived from their old ids.
+        schema_editor.execute(
+            'ALTER TABLE "ticketing_ticketcredential" '
+            'ALTER COLUMN "id" DROP IDENTITY IF EXISTS'
+        )
+        schema_editor.execute(
+            'ALTER TABLE "ticketing_ticketcredential" '
+            'ALTER COLUMN "id" TYPE uuid '
+            'USING md5("id"::text)::uuid'
+        )
+    else:
+        # SQLite requires Django's table-rebuild path to change the primary
+        # key column type.
+        schema_editor.alter_field(model, old_field, new_field, strict=True)
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -59,9 +85,24 @@ class Migration(migrations.Migration):
             name='credential_hash',
             field=models.CharField(help_text='SHA-256 hash of the credential for quick lookup', max_length=64, unique=True),
         ),
-        migrations.AlterField(
-            model_name='ticketcredential',
-            name='id',
-            field=models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False),
+        # TicketCredential was created with Django's default bigint primary key
+        # in 0001. PostgreSQL cannot cast an integer directly to uuid. The
+        # credential id is not referenced by another table, so give existing
+        # rows stable UUID values derived from their old ids before updating
+        # Django's migration state.
+        migrations.SeparateDatabaseAndState(
+            database_operations=[
+                migrations.RunPython(
+                    convert_ticketcredential_ids,
+                    reverse_code=migrations.RunPython.noop,
+                ),
+            ],
+            state_operations=[
+                migrations.AlterField(
+                    model_name='ticketcredential',
+                    name='id',
+                    field=models.UUIDField(default=uuid.uuid4, editable=False, primary_key=True, serialize=False),
+                ),
+            ],
         ),
     ]
