@@ -11,11 +11,20 @@ def confirm_payment(*, payment_id, provider_reference, response=None):
     """Apply a verified provider result and fulfill the linked order once."""
     payment = Payment.objects.select_for_update().select_related("order").get(pk=payment_id)
     if payment.status == Payment.Status.SUCCESSFUL:
+        if payment.provider_reference and provider_reference and payment.provider_reference != provider_reference:
+            raise ValueError("Payment callback reference does not match the confirmed payment")
         return payment, list(payment.order.tickets.all())
     if payment.status not in {Payment.Status.PENDING, Payment.Status.INITIATED}:
         raise ValueError("Payment is not confirmable")
     if payment.amount_minor != payment.order.total_minor or payment.currency != payment.order.currency:
         raise ValueError("Payment amount or currency does not match the order")
+    if payment.provider_reference and provider_reference and payment.provider_reference != provider_reference:
+        raise ValueError("Payment callback reference does not match the payment initiation")
+    duplicate = Payment.objects.filter(
+        provider_reference=provider_reference,
+    ).exclude(pk=payment.pk).exclude(provider_reference="").first()
+    if duplicate:
+        raise ValueError("This provider reference has already been processed")
     payment.mark_successful(provider_reference=provider_reference, response=response)
     order = Order.objects.select_for_update().get(pk=payment.order_id)
     if not order.mark_paid():

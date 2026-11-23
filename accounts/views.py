@@ -1,4 +1,6 @@
 from django.contrib.auth import views as auth_views
+from django.contrib.auth.decorators import login_required
+from django.contrib.auth.forms import PasswordChangeForm
 from django.db import transaction
 from django.shortcuts import redirect, render
 from django.urls import reverse
@@ -7,7 +9,7 @@ from django.views import View
 from organisations.forms import OrganisationForm
 from organisations.models import OrganisationMembership
 
-from .forms import OrganiserRegistrationForm, RegistrationForm
+from .forms import AccountDetailsForm, OrganiserRegistrationForm, RegistrationForm
 
 
 class RegisterView(View):
@@ -65,3 +67,24 @@ class LoginView(auth_views.LoginView):
 
 class LogoutView(auth_views.LogoutView):
     next_page = "login"
+
+
+@login_required
+def account_settings(request):
+    details_form = AccountDetailsForm(instance=request.user)
+    password_form = PasswordChangeForm(request.user)
+    if request.method == "POST":
+        if request.POST.get("action") == "password":
+            password_form = PasswordChangeForm(request.user, request.POST)
+            if password_form.is_valid():
+                password_form.save()
+                return redirect("account-settings")
+        else:
+            details_form = AccountDetailsForm(request.POST, instance=request.user)
+            if details_form.is_valid():
+                details_form.save()
+                return redirect("account-settings")
+    return render(request, "accounts/settings.html", {
+        "details_form": details_form,
+        "password_form": password_form,
+    })

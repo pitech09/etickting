@@ -155,6 +155,8 @@ def event_seating_map(request, event_id):
     from ticketing.models import Event
 
     event = get_object_or_404(Event, pk=event_id, status__in=["published", "sales_open"])
+    if not event.sales_are_open():
+        return redirect("public-event-detail", pk=event.pk)
     try:
         event_seating = event.event_seating
     except AttributeError:
@@ -207,6 +209,8 @@ def event_seat_map(request, event_id):
     from ticketing.models import Event
 
     event = get_object_or_404(Event, pk=event_id, status__in=["published", "sales_open"])
+    if not event.sales_are_open():
+        return redirect("public-event-detail", pk=event.pk)
     try:
         event_seating = event.event_seating
     except AttributeError:

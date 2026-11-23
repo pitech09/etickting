@@ -40,7 +40,7 @@
 <section aria-labelledby="organisations-heading">
   <h2 id="organisations-heading" class="h4">Your organisations</h2>
   {% if memberships %}
-  <div class="row g-3">{% for membership in memberships %}<div class="col-md-6"><div class="card h-100 shadow-sm"><div class="card-body"><h3 class="h5">{{ membership.organisation.name }}</h3><p class="text-secondary mb-0">Role: {{ membership.get_role_display }}</p>{% if membership.can_manage %}<a class="btn btn-sm btn-outline-primary mt-3" href="{% url 'organisations:edit' membership.organisation.id %}">Payment settings</a>{% endif %}</div></div></div>{% endfor %}</div>
+  <div class="row g-3">{% for membership in memberships %}<div class="col-md-6"><div class="card h-100 shadow-sm"><div class="card-body"><h3 class="h5">{{ membership.organisation.name }}</h3><p class="text-secondary mb-0">Role: {{ membership.get_role_display }}</p>{% if membership.can_manage %}<a class="btn btn-sm btn-outline-primary mt-3" href="{% url 'organisations:edit' membership.organisation.id %}">Organisation settings</a>{% endif %}</div></div></div>{% endfor %}</div>
   {% else %}
   <div class="alert alert-info"><p class="mb-2">You do not belong to an organisation yet.</p><a class="btn btn-primary btn-sm" href="{% url 'organisations:create' %}">Create your organisation</a></div>
   {% endif %}

@@ -6,7 +6,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.http import JsonResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -37,78 +37,90 @@ def order_create(request, event_id):
     """Checkout view: create an order from a cart of tickets/seats."""
     event = get_object_or_404(Event, pk=event_id)
 
-    if event.status not in {Event.Status.PUBLISHED, Event.Status.SALES_OPEN}:
+    if not event.sales_are_open():
         messages.error(request, "This event is not currently available for booking.")
         return redirect("public-event-detail", pk=event.pk)
 
     if request.method == "POST":
         form = OrderCreateForm(request.POST, event=event, user=request.user)
         if form.is_valid():
-            category = TicketCategory.objects.select_for_update().filter(
-                pk=form.cleaned_data["ticket_category"], event=event, is_active=True
+            idempotency_key = request.POST.get("idempotency_key", "").strip() or uuid.uuid4().hex
+            existing = Order.objects.filter(
+                idempotency_key=idempotency_key, customer=request.user
             ).first()
-            if not category:
-                form.add_error("ticket_category", "That ticket category is no longer available.")
+            if existing:
+                return redirect("orders:order-detail", pk=existing.pk)
+            if Order.objects.filter(idempotency_key=idempotency_key).exists():
+                form.add_error(None, "That checkout request belongs to another customer.")
             else:
-                quantity = form.cleaned_data.get("quantity") or 1
-                if quantity > category.max_per_customer:
-                    form.add_error("quantity", f"You can purchase at most {category.max_per_customer} of this ticket.")
-                else:
-                    sold = Ticket.objects.filter(
-                        ticket_category=category,
-                        status__in=[Ticket.Status.ISSUED, Ticket.Status.ADMITTED],
-                    ).count()
-                    if event.ticketing_model == Event.TicketingModel.GENERAL_ADMISSION and sold + quantity > category.total_quantity:
-                        form.add_error("quantity", "There are not enough tickets available.")
-                    else:
-                        try:
-                            with transaction.atomic():
-                                order = Order.objects.create(
-                                    event=event,
-                                    customer=request.user,
-                                    idempotency_key=request.POST.get("idempotency_key", "") or uuid.uuid4().hex,
-                                )
-                                if event.ticketing_model == Event.TicketingModel.RESERVED_SEATING:
-                                    request.session.save()
-                                    reservations, errors = reserve_seats(
-                                        event=event,
-                                        seat_ids=[form.cleaned_data["seat"]],
-                                        session_key=request.session.session_key,
-                                    )
-                                    if errors or not reservations:
-                                        raise ValueError(errors[0] if errors else "That seat is no longer available.")
-                                    seat = Seat.objects.get(pk=form.cleaned_data["seat"])
-                                    OrderLine.objects.create(
-                                        order=order,
-                                        line_type=OrderLine.LineType.SEAT,
-                                        ticket_category=category,
-                                        seat=seat,
-                                        unit_price_minor=category.price_minor,
-                                        quantity=1,
-                                        line_total_minor=category.price_minor,
-                                    )
-                                else:
-                                    request.session.save()
-                                    hold_general_admission(
-                                        order=order,
-                                        category=category,
-                                        quantity=quantity,
-                                        session_key=request.session.session_key,
-                                    )
-                                    OrderLine.objects.create(
-                                        order=order,
-                                        line_type=OrderLine.LineType.TICKET_CATEGORY,
-                                        ticket_category=category,
-                                        unit_price_minor=category.price_minor,
-                                        quantity=quantity,
-                                        line_total_minor=category.price_minor * quantity,
-                                    )
-                                calculate_order_total(order)
-                        except ValueError as exc:
-                            form.add_error(None, str(exc))
+                try:
+                    with transaction.atomic():
+                        category = TicketCategory.objects.select_for_update().filter(
+                            pk=form.cleaned_data["ticket_category"], event=event, is_active=True
+                        ).first()
+                        if not category:
+                            raise ValueError("That ticket category is no longer available.")
+                        now = timezone.now()
+                        if category.sales_opens_at and now < category.sales_opens_at:
+                            raise ValueError("This ticket category is not on sale yet.")
+                        if category.sales_closes_at and now > category.sales_closes_at:
+                            raise ValueError("Sales for this ticket category have closed.")
+                        quantity = form.cleaned_data.get("quantity") or 1
+                        if quantity > category.max_per_customer:
+                            raise ValueError(f"You can purchase at most {category.max_per_customer} of this ticket.")
+                        order = Order.objects.create(
+                            event=event,
+                            customer=request.user,
+                            idempotency_key=idempotency_key,
+                        )
+                        request.session.save()
+                        if event.ticketing_model == Event.TicketingModel.RESERVED_SEATING:
+                            reservations, errors = reserve_seats(
+                                event=event,
+                                seat_ids=[form.cleaned_data["seat"]],
+                                session_key=request.session.session_key,
+                            )
+                            if errors or not reservations:
+                                raise ValueError(errors[0] if errors else "That seat is no longer available.")
+                            seat = Seat.objects.get(pk=form.cleaned_data["seat"])
+                            OrderLine.objects.create(
+                                order=order,
+                                line_type=OrderLine.LineType.SEAT,
+                                ticket_category=category,
+                                seat=seat,
+                                seat_reservation=reservations[0],
+                                unit_price_minor=category.price_minor,
+                                quantity=1,
+                                line_total_minor=category.price_minor,
+                            )
                         else:
-                            messages.success(request, f"Order {order.reference} created. Complete payment to receive your tickets.")
-                            return redirect("orders:order-detail", pk=order.pk)
+                            hold_general_admission(
+                                order=order,
+                                category=category,
+                                quantity=quantity,
+                                session_key=request.session.session_key,
+                            )
+                            OrderLine.objects.create(
+                                order=order,
+                                line_type=OrderLine.LineType.TICKET_CATEGORY,
+                                ticket_category=category,
+                                unit_price_minor=category.price_minor,
+                                quantity=quantity,
+                                line_total_minor=category.price_minor * quantity,
+                            )
+                        calculate_order_total(order)
+                except IntegrityError:
+                    existing = Order.objects.filter(
+                        idempotency_key=idempotency_key, customer=request.user
+                    ).first()
+                    if existing:
+                        return redirect("orders:order-detail", pk=existing.pk)
+                    raise
+                except ValueError as exc:
+                    form.add_error(None, str(exc))
+                else:
+                    messages.success(request, f"Order {order.reference} created. Complete payment to receive your tickets.")
+                    return redirect("orders:order-detail", pk=order.pk)
     else:
         # Build initial data from session cart or display available tickets
         form = OrderCreateForm(
@@ -117,7 +129,11 @@ def order_create(request, event_id):
             initial={"seat": request.GET.get("seat")} if request.GET.get("seat") else None,
         )
 
-    return render(request, "orders/order_create.html", {"form": form, "event": event, "idempotency_key": uuid.uuid4().hex})
+    return render(request, "orders/order_create.html", {
+        "form": form,
+        "event": event,
+        "idempotency_key": request.POST.get("idempotency_key", "") or uuid.uuid4().hex,
+    })
 
 
 @customer_required
@@ -156,6 +172,11 @@ def order_detail(request, pk):
                 payment.amount_minor = order.total_minor
                 payment.currency = order.currency
                 payment.status = Payment.Status.PENDING
+                payment.idempotency_key = (
+                    request.headers.get("Idempotency-Key", "").strip()
+                    or payment.idempotency_key
+                    or uuid.uuid4().hex
+                )
                 payment.submitted_at = timezone.now()
                 payment.save()
                 messages.success(request, "Your payment proof was submitted for organiser review.")

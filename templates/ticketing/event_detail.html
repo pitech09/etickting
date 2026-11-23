@@ -17,6 +17,9 @@
       <button class="btn btn-primary">Open sales</button>
     </form>
     {% endif %}
+    {% if event.status == 'published' %}<form method="post" action="{% url 'ticketing:event-unpublish' event.id %}" class="d-inline">{% csrf_token %}<button class="btn btn-outline-warning">Unpublish</button></form>{% endif %}
+    {% if event.status == 'sales_open' or event.status == 'sales_paused' or event.status == 'sold_out' %}<form method="post" action="{% url 'ticketing:event-complete' event.id %}" class="d-inline">{% csrf_token %}<button class="btn btn-outline-secondary">Mark completed</button></form>{% endif %}
+    {% if event.status != 'cancelled' and event.status != 'completed' %}<form method="post" action="{% url 'ticketing:event-cancel' event.id %}" class="d-inline">{% csrf_token %}<button class="btn btn-outline-danger">Cancel event</button></form>{% endif %}
     <a href="{% url 'ticketing:ticket-scanner-page' event.id %}" class="btn btn-primary">Open scanner</a>
     <a href="{% url 'ticketing:inventory-dashboard' event.id %}" class="btn btn-outline-primary">Live inventory</a>
   </div>

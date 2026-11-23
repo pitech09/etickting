@@ -21,6 +21,9 @@ def hold_general_admission(*, order, category, quantity, session_key="", minutes
     minutes = minutes or getattr(settings, "TICKETING_HOLD_MINUTES", 10)
     now = timezone.now()
     expires_at = now + timedelta(minutes=minutes)
+    from ticketing.models import TicketCategory
+
+    category = TicketCategory.objects.select_for_update().get(pk=category.pk)
     InventoryHold.objects.filter(
         ticket_category=category,
         status=InventoryHold.Status.ACTIVE,

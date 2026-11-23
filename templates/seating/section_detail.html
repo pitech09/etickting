@@ -25,7 +25,7 @@
           <dt class="col-sm-4">Accessible</dt>
           <dd class="col-sm-8">{% if section.is_accessible %}Yes{% else %}No{% endif %}</dd>
           <dt class="col-sm-4">Price modifier</dt>
-          <dd class="col-sm-8">{{ section.price_modifier_minor }} minor units</dd>
+          <dd class="col-sm-8">M {{ section.price_modifier_maloti|floatformat:2 }}</dd>
           <dt class="col-sm-4">Sort order</dt>
           <dd class="col-sm-8">{{ section.sort_order }}</dd>
           {% if section.description %}

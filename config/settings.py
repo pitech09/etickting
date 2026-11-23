@@ -83,6 +83,7 @@ LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
 SUPPORT_EMAIL = os.getenv("ETICKTING_SUPPORT_EMAIL", "support@etickting.local")
+REDIS_CONFIGURED = bool(os.getenv("REDIS_URL"))
 REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 TICKETING_SIGNING_KEYS = os.getenv("TICKETING_SIGNING_KEYS", "")
 TICKETING_VERIFY_KEYS = os.getenv("TICKETING_VERIFY_KEYS", "")
@@ -96,6 +97,12 @@ BLOCKCHAIN_PRIVATE_KEY = os.getenv("BLOCKCHAIN_PRIVATE_KEY", "")
 CHANNEL_LAYERS = {"default": {"BACKEND": "channels_redis.core.RedisChannelLayer", "CONFIG": {"hosts": [REDIS_URL]}}}
 CELERY_BROKER_URL = REDIS_URL
 CELERY_RESULT_BACKEND = REDIS_URL
+CACHES = {
+    "default": {
+        "BACKEND": "django.core.cache.backends.redis.RedisCache" if REDIS_CONFIGURED else "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": REDIS_URL if REDIS_CONFIGURED else "etickting-local-cache",
+    }
+}
 
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = "DENY"

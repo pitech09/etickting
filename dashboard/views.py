@@ -1,4 +1,5 @@
 from functools import wraps
+from decimal import Decimal
 from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db import transaction
@@ -7,6 +8,7 @@ from django.db.models import Count, Sum
 from django.http import FileResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
+from datetime import date
 
 from ticketing.models import Event
 from payments.forms import PaymentReviewForm
@@ -65,6 +67,10 @@ def public_home(request):
 def public_event_list(request):
     events = _public_events()
     query = request.GET.get("q", "").strip()
+    category = request.GET.get("category", "").strip()
+    location = request.GET.get("location", "").strip()
+    date_from = request.GET.get("date_from", "").strip()
+    date_to = request.GET.get("date_to", "").strip()
     if query:
         events = events.filter(
             Q(name__icontains=query)
@@ -72,10 +78,41 @@ def public_event_list(request):
             | Q(venue__name__icontains=query)
             | Q(venue__city__icontains=query)
         )
+    if category:
+        events = events.filter(ticket_categories__name__icontains=category)
+    if location:
+        events = events.filter(
+            Q(venue__city__icontains=location) | Q(venue__name__icontains=location)
+        )
+    try:
+        if date_from:
+            events = events.filter(starts_at__date__gte=date.fromisoformat(date_from))
+        if date_to:
+            events = events.filter(starts_at__date__lte=date.fromisoformat(date_to))
+    except ValueError:
+        date_from = ""
+        date_to = ""
+    categories = (
+        Event.objects.filter(
+            Q(status=Event.Status.PUBLISHED) | Q(status=Event.Status.SALES_OPEN),
+            ticket_categories__name__isnull=False,
+        )
+        .values_list("ticket_categories__name", flat=True)
+        .distinct()
+        .order_by("ticket_categories__name")
+    )
     return render(
         request,
         "public/event_list.html",
-        {"events": events, "query": query},
+        {
+            "events": events.distinct(),
+            "query": query,
+            "category": category,
+            "location": location,
+            "date_from": date_from,
+            "date_to": date_to,
+            "categories": categories,
+        },
     )
 
 
@@ -104,7 +141,7 @@ def dashboard(request):
         "memberships": memberships,
         "primary_organisation": memberships.first().organisation if memberships.exists() else None,
         "events": events,
-        "metrics": {"revenue_minor": revenue, "tickets_sold": sold, "tickets_available": available, "check_ins": checked_in, "active_events": events.filter(status__in=[Event.Status.PUBLISHED, Event.Status.SALES_OPEN]).count(), "pending_payments": pending_payments.count()},
+        "metrics": {"revenue_minor": Decimal(revenue) / Decimal("100"), "revenue_maloti": Decimal(revenue) / Decimal("100"), "tickets_sold": sold, "tickets_available": available, "check_ins": checked_in, "active_events": events.filter(status__in=[Event.Status.PUBLISHED, Event.Status.SALES_OPEN]).count(), "pending_payments": pending_payments.count()},
         "recent_orders": Order.objects.filter(event_id__in=event_ids).select_related("event", "customer")[:6],
     }
     return render(request, "dashboard/home.html", context)

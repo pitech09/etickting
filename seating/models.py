@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
@@ -43,6 +44,10 @@ class SeatingSection(models.Model):
 
     def __str__(self):
         return f"{self.venue.name} — {self.name}"
+
+    @property
+    def price_modifier_maloti(self):
+        return Decimal(self.price_modifier_minor) / Decimal("100")
 
 
 class SeatingRow(models.Model):

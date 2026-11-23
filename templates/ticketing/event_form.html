@@ -4,7 +4,7 @@
     <div class="card shadow-sm">
       <div class="card-body">
         <h1 class="h3 mb-4">{% if object %}Edit event{% else %}Create a new event{% endif %}</h1>
-        <form method="post" novalidate>
+        <form method="post" enctype="multipart/form-data" novalidate>
           {% csrf_token %}
           <div class="row g-3">
             <div class="col-md-6">
@@ -88,7 +88,7 @@
             <div class="col-12">
               <label class="form-label fw-semibold">{{ form.cover_image.label }}</label>
               {{ form.cover_image }}
-              <div class="form-text">Optional URL to a cover image for the event.</div>
+              <div class="form-text">Optional JPEG, PNG or WebP image, up to 10 MB.</div>
               {% if form.cover_image.errors %}<div class="text-danger small">{{ form.cover_image.errors }}</div>{% endif %}
             </div>
           </div>

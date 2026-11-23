@@ -2,16 +2,61 @@
 {% block title %}Scanner · {{ event.name }} · eTickting{% endblock %}
 {% block content %}
 <div class="d-flex justify-content-between align-items-start gap-3 mb-4"><div><p class="text-uppercase text-primary small fw-semibold mb-2">Staff scanner</p><h1 class="h2">{{ event.name }}</h1><p class="text-secondary mb-0">Scan and admit one ticket at a time. The server remains the source of truth.</p></div><a href="{% url 'dashboard' %}" class="btn btn-outline-secondary">Dashboard</a></div>
-{% if devices %}<div class="row justify-content-center"><div class="col-lg-7"><div class="card shadow-sm p-4"><form id="scan-form"><input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}"><label class="form-label fw-semibold" for="device">Scanner device</label><select id="device" class="form-select mb-3" required>{% for device in devices %}<option value="{{ device.device_id }}">{{ device.device_id }}</option>{% endfor %}</select><label class="form-label fw-semibold" for="scan-credential">QR credential</label><textarea id="scan-credential" class="form-control font-monospace mb-3" rows="4" required autofocus placeholder="Scan or paste the QR credential"></textarea><button class="btn btn-primary btn-lg w-100" type="submit">Check and admit</button></form><div id="scan-result" class="mt-4" aria-live="assertive"></div></div></div></div>{% else %}<div class="alert alert-warning"><h2 class="h5">No active scanner device</h2><p class="mb-0">Your account has access to this event, but no active device is registered for you. An organisation administrator must register one before scanning.</p></div>{% endif %}
+{% if devices %}<div class="row justify-content-center"><div class="col-lg-7"><div class="card shadow-sm p-4"><form id="scan-form"><input type="hidden" name="csrfmiddlewaretoken" value="{{ csrf_token }}"><label class="form-label fw-semibold" for="device">Scanner device</label><select id="device" class="form-select mb-3" required>{% for device in devices %}<option value="{{ device.device_id }}">{{ device.device_id }}</option>{% endfor %}</select><div class="border rounded p-3 mb-3 bg-light"><div class="d-flex justify-content-between align-items-center gap-2 mb-2"><div><label class="form-label fw-semibold mb-0" for="camera-reader">Camera scanner</label><p class="small text-secondary mb-0">Use this phone, tablet or computer camera to read the ticket QR.</p></div><div class="d-flex gap-2"><button class="btn btn-outline-primary btn-sm" id="start-camera" type="button">Start camera</button><button class="btn btn-outline-secondary btn-sm" id="stop-camera" type="button" disabled>Stop</button></div></div><div id="camera-reader" class="d-none" aria-label="Camera QR scanner"></div><div id="camera-status" class="small text-secondary" aria-live="polite">Camera is off. Camera access requires HTTPS or localhost.</div></div><label class="form-label fw-semibold" for="scan-credential">QR credential</label><textarea id="scan-credential" class="form-control font-monospace mb-3" rows="4" required autofocus placeholder="Scan with the camera, use a USB/Bluetooth scanner, or paste the QR credential"></textarea><button class="btn btn-primary btn-lg w-100" type="submit">Check and admit</button></form><div id="scan-result" class="mt-4" aria-live="assertive"></div></div></div></div>{% else %}<div class="alert alert-warning"><h2 class="h5">No active scanner device</h2><p class="mb-0">Your account has access to this event, but no active device is registered for you. An organisation administrator must register one before scanning.</p></div>{% endif %}
+<script src="https://unpkg.com/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
 <script>
-function getCookie(name) { return document.cookie.split('; ').find(row => row.startsWith(name + '='))?.split('=')[1]; }
 const scanForm = document.getElementById('scan-form');
+const cameraReader = document.getElementById('camera-reader');
+const cameraStatus = document.getElementById('camera-status');
+const startCameraButton = document.getElementById('start-camera');
+const stopCameraButton = document.getElementById('stop-camera');
+let cameraScanner = null;
+let cameraRunning = false;
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
+const stopCamera = async () => {
+  if (!cameraScanner || !cameraRunning) return;
+  try { await cameraScanner.stop(); } catch (error) { console.warn('Unable to stop camera scanner', error); }
+  cameraRunning = false;
+  cameraReader.classList.add('d-none');
+  startCameraButton.disabled = false;
+  stopCameraButton.disabled = true;
+  cameraStatus.textContent = 'Camera is off.';
+};
+const startCamera = async () => {
+  if (!window.Html5Qrcode) {
+    cameraStatus.textContent = 'Camera scanner could not load. Use manual entry or a USB/Bluetooth QR scanner.';
+    return;
+  }
+  if (cameraRunning) return;
+  cameraReader.classList.remove('d-none');
+  cameraStatus.textContent = 'Requesting camera access…';
+  cameraScanner = cameraScanner || new Html5Qrcode('camera-reader');
+  try {
+    await cameraScanner.start({facingMode: 'environment'}, {fps: 10, qrbox: {width: 250, height: 250}}, async (credential) => {
+      document.getElementById('scan-credential').value = credential;
+      await stopCamera();
+      scanForm.requestSubmit();
+    }, () => {});
+    cameraRunning = true;
+    startCameraButton.disabled = true;
+    stopCameraButton.disabled = false;
+    cameraStatus.textContent = 'Camera is active. Point it at the ticket QR code.';
+  } catch (error) {
+    cameraReader.classList.add('d-none');
+    cameraStatus.textContent = 'Camera access failed. Allow camera permission and use HTTPS or localhost, then try again.';
+    console.error('Unable to start camera scanner', error);
+  }
+};
+if (startCameraButton) startCameraButton.addEventListener('click', startCamera);
+if (stopCameraButton) stopCameraButton.addEventListener('click', stopCamera);
 if (scanForm) scanForm.addEventListener('submit', async (event) => {
-  event.preventDefault(); const box = document.getElementById('scan-result'); const button = scanForm.querySelector('button');
+  event.preventDefault(); const box = document.getElementById('scan-result');
+  await stopCamera();
+  const button = scanForm.querySelector('button[type="submit"]');
   button.disabled = true; box.innerHTML = '<div class="alert alert-info">Checking ticket…</div>';
   try {
-    const response = await fetch('{% url "ticketing:ticket-scan" event.id %}', {method: 'POST', headers: {'X-CSRFToken': decodeURIComponent(getCookie('csrftoken') || ''), 'X-Scanner-Device': document.getElementById('device').value}, body: new URLSearchParams({credential: document.getElementById('scan-credential').value.trim()})});
+    const csrfToken = scanForm.querySelector('[name="csrfmiddlewaretoken"]').value;
+    const response = await fetch('{% url "ticketing:ticket-scan" event.id %}', {method: 'POST', headers: {'X-CSRFToken': csrfToken, 'X-Scanner-Device': document.getElementById('device').value}, body: new URLSearchParams({credential: document.getElementById('scan-credential').value.trim()})});
     const data = await response.json(); const valid = data.status === 'valid'; const used = data.status === 'used';
     box.innerHTML = `<div class="alert ${valid ? 'alert-success' : used ? 'alert-warning' : 'alert-danger'}"><h2 class="h4">${valid ? 'Admitted' : used ? 'Already admitted' : 'Do not admit'}</h2><p class="mb-1">Status: <strong>${escapeHtml(data.status || 'unknown')}</strong></p>${valid ? `<p class="mb-0">Reference: ${escapeHtml(data.ticket_reference)}${data.seat ? `<br>Seat: ${escapeHtml(data.seat)}` : ''}${data.attendee_name ? `<br>Attendee: ${escapeHtml(data.attendee_name)}` : ''}</p>` : '<p class="mb-0">This result has been recorded. Follow your event procedures.</p>'}</div>`;
     if (valid) document.getElementById('scan-credential').value = '';

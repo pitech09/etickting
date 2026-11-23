@@ -27,7 +27,7 @@ class EventForm(forms.ModelForm):
     venue_address_line_2 = forms.CharField(max_length=200, required=False, label="Address line 2")
     venue_city = forms.CharField(max_length=100, label="City or town")
     ticket_name = forms.CharField(max_length=100, label="Ticket name", initial="General admission")
-    ticket_price_maloti = forms.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0.00"), label="Ticket price (M)")
+    ticket_price_maloti = forms.DecimalField(max_digits=10, decimal_places=2, min_value=Decimal("0.00"), label="Ticket price (M)", help_text="Price in Maloti (Loti). Enter amount without decimal for whole Maloti (e.g., 30 = 30 M).")
     ticket_quantity = forms.IntegerField(min_value=1, label="Tickets available")
     ticket_max_per_customer = forms.IntegerField(min_value=1, initial=10, label="Max per customer")
     seating_rows = forms.IntegerField(
@@ -107,6 +107,12 @@ class EventForm(forms.ModelForm):
 
     def clean_venue_name(self):
         return self.cleaned_data["venue_name"].strip()
+
+    def clean_cover_image(self):
+        image = self.cleaned_data.get("cover_image")
+        if image and image.size > 10 * 1024 * 1024:
+            raise forms.ValidationError("Cover image must be 10 MB or smaller.")
+        return image
 
     def clean(self):
         cleaned_data = super().clean()

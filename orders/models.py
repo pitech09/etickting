@@ -92,6 +92,21 @@ class Order(models.Model):
     def is_expired(self):
         return self.status == self.Status.EXPIRED
 
+    @property
+    def total_maloti(self):
+        """Order total in Maloti (major currency units)."""
+        return self.total_minor / 100
+
+    @property
+    def subtotal_maloti(self):
+        """Order subtotal in Maloti."""
+        return self.subtotal_minor / 100
+
+    @property
+    def fee_maloti(self):
+        """Platform service fee in Maloti."""
+        return self.fee_minor / 100
+
     def mark_paid(self):
         """Mark the order as paid and set the paid timestamp."""
         if self.status != self.Status.PENDING:
@@ -100,6 +115,7 @@ class Order(models.Model):
         self.paid_at = timezone.now()
         self.save(update_fields=["status", "paid_at", "updated_at"])
         return True
+
 
 
 class OrderLine(models.Model):
@@ -114,10 +130,13 @@ class OrderLine(models.Model):
         SEAT = "seat", "Reserved seat"
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+
     order = models.ForeignKey(
         Order, on_delete=models.CASCADE, related_name="lines"
     )
+
     line_type = models.CharField(max_length=20, choices=LineType.choices)
+
     ticket_category = models.ForeignKey(
         "ticketing.TicketCategory",
         null=True,
@@ -125,6 +144,7 @@ class OrderLine(models.Model):
         on_delete=models.PROTECT,
         related_name="order_lines",
     )
+
     seat = models.ForeignKey(
         "seating.Seat",
         null=True,
@@ -132,10 +152,21 @@ class OrderLine(models.Model):
         on_delete=models.PROTECT,
         related_name="order_lines",
     )
+
+    seat_reservation = models.ForeignKey(
+        "seating.SeatReservation",
+        null=True,
+        blank=True,
+        on_delete=models.PROTECT,
+        related_name="order_lines",
+    )
+
     quantity = models.PositiveIntegerField(default=1)
+
     unit_price_minor = models.PositiveIntegerField(
         help_text="Unit price in minor currency units"
     )
+
     line_total_minor = models.PositiveIntegerField(
         help_text="Line total in minor currency units"
     )
@@ -148,9 +179,15 @@ class OrderLine(models.Model):
             return f"{self.ticket_category.name} x{self.quantity}"
         return f"Seat {self.seat.label}"
 
+    @property
+    def line_total_maloti(self):
+        """Line total in Maloti (major currency units)."""
+        return self.line_total_minor / 100
+
     def save(self, *args, **kwargs):
         self.line_total_minor = self.unit_price_minor * self.quantity
         super().save(*args, **kwargs)
+
 
 
 class InventoryHold(models.Model):

@@ -220,6 +220,19 @@ class TicketAuthenticityTests(TestCase):
         self.assertEqual(response.status_code, 302)
         self.assertEqual(TicketCategory.objects.get(name="VIP").price_minor, 15050)
 
+    def test_event_can_be_unpublished_and_completed_through_lifecycle_actions(self):
+        self.client.force_login(self.staff)
+        unpublished = self.client.post(reverse("ticketing:event-unpublish", args=[self.event.pk]))
+        self.assertEqual(unpublished.status_code, 302)
+        self.assertEqual(Event.objects.get(pk=self.event.pk).status, Event.Status.DRAFT)
+
+        self.event.status = Event.Status.SALES_OPEN
+        self.event.starts_at = timezone.now() - timedelta(hours=2)
+        self.event.save(update_fields=["status", "starts_at"])
+        completed = self.client.post(reverse("ticketing:event-complete", args=[self.event.pk]))
+        self.assertEqual(completed.status_code, 302)
+        self.assertEqual(Event.objects.get(pk=self.event.pk).status, Event.Status.COMPLETED)
+
 
 class EventCreationPricingTests(TestCase):
     def setUp(self):

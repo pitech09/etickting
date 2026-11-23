@@ -299,6 +299,57 @@ class EventSalesOpenView(_RequiresOrganisationEventAccess, View):
         return redirect("ticketing:event-detail", pk=event.pk)
 
 
+class EventUnpublishView(_RequiresOrganisationEventAccess, View):
+    @transaction.atomic
+    def post(self, request, pk):
+        event = get_object_or_404(Event.objects.filter(organisation__memberships__user=request.user), pk=pk)
+        if not event.can_unpublish():
+            messages.error(request, "Only published events can be unpublished.")
+        else:
+            event.status = Event.Status.DRAFT
+            event.save(update_fields=["status", "updated_at"])
+            messages.success(request, f'Event "{event.name}" is now a draft.')
+        return redirect("ticketing:event-detail", pk=event.pk)
+
+
+class EventCancelView(_RequiresOrganisationEventAccess, View):
+    @transaction.atomic
+    def post(self, request, pk):
+        from orders.models import InventoryHold, Order
+        from .models import Ticket
+
+        event = get_object_or_404(Event.objects.select_for_update().filter(organisation__memberships__user=request.user), pk=pk)
+        if event.status in {Event.Status.CANCELLED, Event.Status.COMPLETED}:
+            messages.error(request, "This event can no longer be cancelled.")
+        else:
+            event.status = Event.Status.CANCELLED
+            event.save(update_fields=["status", "updated_at"])
+            Order.objects.filter(event=event, status=Order.Status.PENDING).update(status=Order.Status.CANCELLED, updated_at=timezone.now())
+            InventoryHold.objects.filter(
+                order__event=event,
+                order__status=Order.Status.CANCELLED,
+                status=InventoryHold.Status.ACTIVE,
+            ).update(status=InventoryHold.Status.RELEASED, updated_at=timezone.now())
+            Ticket.objects.filter(event=event, status__in=[Ticket.Status.ISSUED, Ticket.Status.ADMITTED]).update(
+                status=Ticket.Status.CANCELLED, updated_at=timezone.now()
+            )
+            messages.warning(request, f'Event "{event.name}" was cancelled. Paid orders require refund review.')
+        return redirect("ticketing:event-detail", pk=event.pk)
+
+
+class EventCompleteView(_RequiresOrganisationEventAccess, View):
+    @transaction.atomic
+    def post(self, request, pk):
+        event = get_object_or_404(Event.objects.filter(organisation__memberships__user=request.user), pk=pk)
+        if not event.can_complete():
+            messages.error(request, "An event can only be completed after its scheduled end.")
+        else:
+            event.status = Event.Status.COMPLETED
+            event.save(update_fields=["status", "updated_at"])
+            messages.success(request, f'Event "{event.name}" is now completed.')
+        return redirect("ticketing:event-detail", pk=event.pk)
+
+
 class TicketCategoryListView(_RequiresOrganisationEventAccess, ListView):
     model = TicketCategory
     template_name = "ticketing/ticket_category_list.html"

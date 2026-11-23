@@ -53,7 +53,15 @@ class Event(models.Model):
     organisation = models.ForeignKey(Organisation, on_delete=models.CASCADE, related_name="events")
     name = models.CharField(max_length=200)
     description = models.TextField(blank=True)
-    cover_image = models.URLField(blank=True)
+    cover_image = models.ImageField(
+        upload_to="event-covers/",
+        blank=True,
+        help_text="Optional event cover image (JPEG, PNG or WebP; maximum 10 MB).",
+    )
+    cover_image_url = models.URLField(
+        blank=True,
+        help_text="Legacy external cover image URL, retained for compatibility.",
+    )
     venue = models.ForeignKey(
         "venues.Venue",
         on_delete=models.SET_NULL,
@@ -79,9 +87,32 @@ class Event(models.Model):
     def __str__(self):
         return self.name
 
+    @property
+    def cover_image_src(self):
+        """Return a safe browser URL for either an upload or legacy URL."""
+        if self.cover_image:
+            name = self.cover_image.name or ""
+            if name.startswith(("http://", "https://")):
+                return name
+            return self.cover_image.url
+        return self.cover_image_url
+
     def can_publish(self):
         """An event can be published when it has a name, start time and organisation."""
         return bool(self.name and self.starts_at and self.organisation_id)
+
+    def can_unpublish(self):
+        return self.status == self.Status.PUBLISHED
+
+    def can_complete(self):
+        from django.utils import timezone
+
+        end = self.ends_at or self.starts_at
+        return self.status in {
+            self.Status.SALES_OPEN,
+            self.Status.SALES_PAUSED,
+            self.Status.SOLD_OUT,
+        } and end <= timezone.now()
 
     def sales_are_open(self):
         from django.utils import timezone
@@ -474,3 +505,7 @@ class ResaleListing(models.Model):
 
     def __str__(self):
         return f"Resale listing for {self.ticket.reference}"
+
+    @property
+    def price_maloti(self):
+        return Decimal(self.price_minor) / Decimal("100")

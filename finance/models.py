@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
@@ -39,4 +40,12 @@ class Payout(models.Model):
     amount_minor = models.PositiveIntegerField()
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     provider_reference = models.CharField(max_length=160, blank=True)
+    idempotency_key = models.CharField(max_length=128, unique=True)
+    failure_reason = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    paid_at = models.DateTimeField(null=True, blank=True)
+
+    @property
+    def amount_maloti(self):
+        return Decimal(self.amount_minor) / Decimal("100")

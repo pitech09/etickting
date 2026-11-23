@@ -116,3 +116,27 @@ class PendingPaymentsDashboardTests(TestCase):
 
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "M 12.50")
+
+    def test_public_event_filters_by_category_location_and_date(self):
+        from datetime import timedelta
+
+        from venues.models import Venue
+
+        category = self.event.ticket_categories.create(
+            name="Jazz", price_minor=1500, total_quantity=20
+        )
+        venue = Venue.objects.create(
+            organisation=self.event.organisation, name="Maseru Hall", slug="maseru-hall", city="Maseru"
+        )
+        self.event.venue = venue
+        self.event.status = Event.Status.PUBLISHED
+        self.event.starts_at = timezone.now() + timedelta(days=5)
+        self.event.save(update_fields=["venue", "status", "starts_at"])
+
+        response = self.client.get(
+            reverse("public-event-list"),
+            {"category": "Jazz", "location": "Maseru", "date_from": (timezone.now() + timedelta(days=4)).date().isoformat()},
+        )
+
+        self.assertContains(response, self.event.name)
+        self.assertContains(response, category.name)
