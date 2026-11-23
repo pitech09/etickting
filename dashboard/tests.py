@@ -140,3 +140,28 @@ class PendingPaymentsDashboardTests(TestCase):
 
         self.assertContains(response, self.event.name)
         self.assertContains(response, category.name)
+
+
+class PlatformDashboardTests(TestCase):
+    def test_only_superusers_can_view_platform_dashboard(self):
+        user = User.objects.create_user(email="platform@example.com", password="pass-12345")
+        user.is_staff = True
+        user.is_superuser = True
+        user.save(update_fields=["is_staff", "is_superuser"])
+
+        self.client.force_login(user)
+        response = self.client.get(reverse("platform-dashboard"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Platform owner dashboard")
+        self.assertContains(response, "Private signing and encryption values remain")
+
+    def test_regular_staff_user_cannot_view_platform_dashboard(self):
+        user = User.objects.create_user(email="staff@example.com", password="pass-12345")
+        user.is_staff = True
+        user.save(update_fields=["is_staff"])
+
+        self.client.force_login(user)
+        response = self.client.get(reverse("platform-dashboard"))
+
+        self.assertEqual(response.status_code, 403)

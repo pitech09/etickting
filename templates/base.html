@@ -26,6 +26,7 @@
         {% if user.is_authenticated %}
           <a href="{% url 'account-settings' %}">Account settings</a>
           {% if user.is_staff or user.is_superuser %}
+            {% if user.is_superuser %}<a href="{% url 'platform-dashboard' %}">Platform owner</a>{% endif %}
             <a href="{% url 'admin:index' %}">Admin</a>
           {% elif user.organisation_memberships.exists %}
             <a href="{% url 'dashboard' %}">Workspace</a>

@@ -56,11 +56,18 @@ if (scanForm) scanForm.addEventListener('submit', async (event) => {
   button.disabled = true; box.innerHTML = '<div class="alert alert-info">Checking ticket…</div>';
   try {
     const csrfToken = scanForm.querySelector('[name="csrfmiddlewaretoken"]').value;
-    const response = await fetch('{% url "ticketing:ticket-scan" event.id %}', {method: 'POST', headers: {'X-CSRFToken': csrfToken, 'X-Scanner-Device': document.getElementById('device').value}, body: new URLSearchParams({credential: document.getElementById('scan-credential').value.trim()})});
-    const data = await response.json(); const valid = data.status === 'valid'; const used = data.status === 'used';
+    const response = await fetch('{% url "ticketing:ticket-scan" event.id %}', {method: 'POST', credentials: 'same-origin', headers: {'Accept': 'application/json', 'X-CSRFToken': csrfToken, 'X-Scanner-Device': document.getElementById('device').value}, body: new URLSearchParams({credential: document.getElementById('scan-credential').value.trim()})});
+    const responseText = await response.text();
+    let data;
+    try { data = JSON.parse(responseText); } catch (parseError) { throw new Error(`Server returned HTTP ${response.status} instead of JSON.`); }
+    if (!response.ok && !data.status) {
+      const detail = data.detail || (response.status === 403 ? 'This scanner device is not authorised for the event.' : `The scan request failed with HTTP ${response.status}.`);
+      throw new Error(detail);
+    }
+    const valid = data.status === 'valid'; const used = data.status === 'used';
     box.innerHTML = `<div class="alert ${valid ? 'alert-success' : used ? 'alert-warning' : 'alert-danger'}"><h2 class="h4">${valid ? 'Admitted' : used ? 'Already admitted' : 'Do not admit'}</h2><p class="mb-1">Status: <strong>${escapeHtml(data.status || 'unknown')}</strong></p>${valid ? `<p class="mb-0">Reference: ${escapeHtml(data.ticket_reference)}${data.seat ? `<br>Seat: ${escapeHtml(data.seat)}` : ''}${data.attendee_name ? `<br>Attendee: ${escapeHtml(data.attendee_name)}` : ''}</p>` : '<p class="mb-0">This result has been recorded. Follow your event procedures.</p>'}</div>`;
     if (valid) document.getElementById('scan-credential').value = '';
-  } catch (error) { box.innerHTML = '<div class="alert alert-danger">Scanner service unavailable. Do not admit the ticket until it has been checked.</div>'; }
+  } catch (error) { box.innerHTML = `<div class="alert alert-danger"><strong>Scan could not be completed.</strong><p class="mb-0">${escapeHtml(error.message || 'Scanner service unavailable. Check your connection and try again.')}</p><p class="mb-0 mt-2">Do not admit the ticket until the server confirms it.</p></div>`; }
   button.disabled = false;
 });
 </script>

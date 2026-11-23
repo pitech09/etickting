@@ -1,7 +1,11 @@
 from functools import wraps
 from decimal import Decimal
 from django.contrib import messages
+from django.core.cache import cache
+from django.core.exceptions import PermissionDenied
 from django.contrib.auth.decorators import login_required
+from django.conf import settings
+from django.db import connection
 from django.db import transaction
 from django.db.models import Min, Q
 from django.db.models import Count, Sum
@@ -34,6 +38,75 @@ def customer_required(view):
             return redirect("dashboard")
         return view(request, *args, **kwargs)
     return wrapped
+
+
+def platform_owner_required(view):
+    @wraps(view)
+    @login_required
+    def wrapped(request, *args, **kwargs):
+        if not request.user.is_superuser:
+            raise PermissionDenied
+        return view(request, *args, **kwargs)
+
+    return wrapped
+
+
+@platform_owner_required
+def platform_dashboard(request):
+    from accounts.models import User
+    from organisations.models import Organisation
+    from orders.models import Order
+    from ticketing.models import Ticket
+
+    database_ready = False
+    try:
+        connection.ensure_connection()
+        database_ready = True
+    except Exception:
+        pass
+
+    redis_ready = False
+    if settings.REDIS_CONFIGURED:
+        try:
+            cache.set("platform-readiness-check", "ok", 5)
+            redis_ready = cache.get("platform-readiness-check") == "ok"
+        except Exception:
+            pass
+
+    try:
+        from ticketing.key_management import signing_keys, verification_keys
+
+        signing_key_ids = list(signing_keys())
+        verification_key_ids = list(verification_keys())
+        key_error = ""
+    except Exception as exc:
+        signing_key_ids = []
+        verification_key_ids = []
+        key_error = str(exc)
+
+    context = {
+        "metrics": {
+            "users": User.objects.count(),
+            "organisations": Organisation.objects.count(),
+            "events": Event.objects.count(),
+            "orders": Order.objects.count(),
+            "tickets": Ticket.objects.count(),
+            "admitted_tickets": Ticket.objects.filter(status=Ticket.Status.ADMITTED).count(),
+        },
+        "health": {
+            "database": database_ready,
+            "redis": redis_ready,
+            "redis_configured": settings.REDIS_CONFIGURED,
+            "object_storage": settings.USE_OBJECT_STORAGE,
+            "signing_keys": bool(signing_key_ids),
+            "encryption_key": bool(settings.TICKETING_CREDENTIAL_ENCRYPTION_KEY),
+            "key_error": key_error,
+            "signing_key_ids": signing_key_ids,
+            "verification_key_ids": verification_key_ids,
+        },
+        "recent_events": Event.objects.select_related("organisation").order_by("-starts_at")[:8],
+    }
+    return render(request, "dashboard/platform.html", context)
 
 
 def _public_events():

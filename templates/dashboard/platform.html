@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Platform owner · Kena{% endblock %}
+{% block content %}
+<div class="hero p-4 p-md-5 mb-5">
+  <p class="text-uppercase small fw-semibold mb-2 opacity-75">Platform operations</p>
+  <h1 class="display-6 fw-bold">Platform owner dashboard</h1>
+  <p class="mb-0 opacity-75">Monitor the whole ticketing platform without exposing deployment secrets.</p>
+</div>
+
+<section aria-labelledby="platform-metrics-heading" class="mb-5">
+  <div class="d-flex justify-content-between align-items-center mb-3">
+    <div><p class="eyebrow mb-1">Platform overview</p><h2 id="platform-metrics-heading" class="h4 mb-0">Key totals</h2></div>
+    <a class="btn btn-outline-primary btn-sm" href="{% url 'admin:index' %}">Open Django admin</a>
+  </div>
+  <div class="row g-3">
+    <div class="col-6 col-lg-2"><div class="card metric-card"><div class="card-body"><span class="eyebrow">Users</span><div class="metric-value">{{ metrics.users }}</div></div></div></div>
+    <div class="col-6 col-lg-2"><div class="card metric-card"><div class="card-body"><span class="eyebrow">Organisations</span><div class="metric-value">{{ metrics.organisations }}</div></div></div></div>
+    <div class="col-6 col-lg-2"><div class="card metric-card"><div class="card-body"><span class="eyebrow">Events</span><div class="metric-value">{{ metrics.events }}</div></div></div></div>
+    <div class="col-6 col-lg-2"><div class="card metric-card"><div class="card-body"><span class="eyebrow">Orders</span><div class="metric-value">{{ metrics.orders }}</div></div></div></div>
+    <div class="col-6 col-lg-2"><div class="card metric-card"><div class="card-body"><span class="eyebrow">Tickets</span><div class="metric-value">{{ metrics.tickets }}</div></div></div></div>
+    <div class="col-6 col-lg-2"><div class="card metric-card"><div class="card-body"><span class="eyebrow">Admitted</span><div class="metric-value">{{ metrics.admitted_tickets }}</div></div></div></div>
+  </div>
+</section>
+
+<div class="row g-4">
+  <section class="col-lg-6" aria-labelledby="health-heading">
+    <div class="card h-100"><div class="card-body">
+      <p class="eyebrow mb-1">Operations</p><h2 id="health-heading" class="h5">System health</h2>
+      <div class="list-group list-group-flush">
+        {% for label, value in health.items %}{% if label == "database" or label == "redis" or label == "object_storage" or label == "signing_keys" or label == "encryption_key" %}<div class="list-group-item px-0 d-flex justify-content-between align-items-center"><span>{{ label|cut:"_"|title }}</span>{% if value %}<span class="badge text-bg-success">Ready</span>{% else %}<span class="badge text-bg-warning">Needs attention</span>{% endif %}</div>{% endif %}{% endfor %}
+      </div>
+      {% if health.key_error %}<div class="alert alert-danger mt-3 mb-0">Signing configuration could not be read: {{ health.key_error }}</div>{% endif %}
+    </div></div>
+  </section>
+  <section class="col-lg-6" aria-labelledby="keys-heading">
+    <div class="card h-100"><div class="card-body">
+      <p class="eyebrow mb-1">Credential security</p><h2 id="keys-heading" class="h5">Key status</h2>
+      <p class="text-secondary small">Only key IDs are shown. Private signing and encryption values remain in deployment secrets.</p>
+      <dl class="row mb-0"><dt class="col-sm-5">Active signing IDs</dt><dd class="col-sm-7">{% if health.signing_key_ids %}{% for key_id in health.signing_key_ids %}<span class="badge text-bg-light border me-1">{{ key_id }}</span>{% endfor %}{% else %}<span class="text-danger">None configured</span>{% endif %}</dd><dt class="col-sm-5 mt-3">Verification IDs</dt><dd class="col-sm-7 mt-3">{% if health.verification_key_ids %}{% for key_id in health.verification_key_ids %}<span class="badge text-bg-light border me-1">{{ key_id }}</span>{% endfor %}{% else %}<span class="text-secondary">Derived from active keys</span>{% endif %}</dd></dl>
+    </div></div>
+  </section>
+</div>
+
+<section class="mt-5" aria-labelledby="events-heading"><div class="d-flex justify-content-between align-items-center mb-3"><div><p class="eyebrow mb-1">Recent activity</p><h2 id="events-heading" class="h4 mb-0">Events across the platform</h2></div><a class="btn btn-outline-primary btn-sm" href="{% url 'ticketing:event-list' %}">Manage events</a></div>
+  {% if recent_events %}<div class="table-responsive card"><table class="table mb-0 align-middle"><thead><tr><th>Event</th><th>Organisation</th><th>Status</th><th>Starts</th></tr></thead><tbody>{% for event in recent_events %}<tr><td>{{ event.name }}</td><td>{{ event.organisation.name }}</td><td><span class="badge text-bg-light border">{{ event.get_status_display }}</span></td><td>{{ event.starts_at|date:"j M Y · H:i" }}</td></tr>{% endfor %}</tbody></table></div>{% else %}<div class="alert alert-info">No events have been created yet.</div>{% endif %}
+</section>
+{% endblock %}
