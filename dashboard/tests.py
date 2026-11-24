@@ -165,3 +165,33 @@ class PlatformDashboardTests(TestCase):
         response = self.client.get(reverse("platform-dashboard"))
 
         self.assertEqual(response.status_code, 403)
+
+    def test_platform_owner_can_suspend_and_reactivate_user(self):
+        owner = User.objects.create_superuser(email="owner@example.com", password="pass-12345")
+        target = User.objects.create_user(email="target@example.com", password="pass-12345")
+        self.client.force_login(owner)
+
+        response = self.client.post(reverse("platform-user-toggle", args=[target.pk]))
+        self.assertRedirects(response, reverse("platform-dashboard"))
+        self.assertFalse(User.objects.get(pk=target.pk).is_active)
+
+        self.client.post(reverse("platform-user-toggle", args=[target.pk]))
+        self.assertTrue(User.objects.get(pk=target.pk).is_active)
+
+    def test_platform_owner_can_pause_event(self):
+        owner = User.objects.create_superuser(email="event-owner@example.com", password="pass-12345")
+        organisation = Organisation.objects.create(name="Platform Events", slug="platform-events")
+        event = Event.objects.create(
+            organisation=organisation,
+            name="Platform Test Event",
+            starts_at=timezone.now(),
+            status=Event.Status.SALES_OPEN,
+        )
+        self.client.force_login(owner)
+
+        response = self.client.post(
+            reverse("platform-event-action", args=[event.pk]),
+            {"action": "suspend"},
+        )
+        self.assertRedirects(response, reverse("platform-dashboard"))
+        self.assertEqual(Event.objects.get(pk=event.pk).status, Event.Status.SALES_PAUSED)
