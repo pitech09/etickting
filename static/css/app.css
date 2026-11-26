@@ -30,6 +30,17 @@
   --motion-standard: 220ms;
 }
 
+.network-status { position: sticky; top: 0; z-index: 1030; margin: 0; border-radius: 0; }
+.network-status .container { min-height: 2.75rem; }
+.state-panel { border: 1px solid #e2e2e7; border-radius: 1rem; padding: 2rem; text-align: center; background: #fff; color: var(--ink); }
+.state-panel p { max-width: 34rem; margin: .5rem auto 1rem; color: #6e6e73; }
+.state-loading { display: flex; align-items: center; justify-content: center; gap: .7rem; min-height: 8rem; color: #515154; }
+.state-empty, .state-error { min-height: 12rem; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.state-error { border-color: #f2c3ca; background: #fff8f8; }
+.state-icon { display: inline-grid; place-items: center; width: 2.5rem; height: 2.5rem; margin-bottom: .7rem; border-radius: 50%; background: #eef3fb; color: var(--brand); font-weight: 800; }
+.state-error .state-icon { color: #982b38; background: #ffebee; }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; } }
+
 /* Shared form system: native Django controls inherit one predictable layout. */
 .form-system { display: flex; flex-direction: column; gap: 1.1rem; }
 .form-field { display: flex; flex-direction: column; gap: .42rem; min-width: 0; }
@@ -111,7 +122,7 @@ main.container { max-width: 1180px; min-height: calc(100vh - 8rem); }
 .hero {
   position: relative;
   overflow: hidden;
-  background: radial-gradient(circle at 92% 5%, rgba(120, 117, 255, .5), transparent 30%), linear-gradient(135deg, #1d1d1f, #313c78 55%, #0071e3);
+  background: #1d1d1f;
   border-radius: 1.5rem;
   box-shadow: 0 20px 45px rgba(0, 64, 160, .2);
 }
@@ -216,7 +227,7 @@ button, a, input, select, textarea { -webkit-tap-highlight-color: transparent; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
-.public-hero { position: relative; overflow: hidden; min-height: 27rem; padding: clamp(2rem, 6vw, 5rem); border-radius: 1.5rem; color: #fff; background: radial-gradient(circle at 85% 15%, rgba(99,102,241,.45), transparent 25%), linear-gradient(120deg, #111827 0%, #172554 58%, #1d4ed8 100%); }
+.public-hero { position: relative; overflow: hidden; min-height: 27rem; padding: clamp(2rem, 6vw, 5rem); border-radius: 1.5rem; color: #fff; background: #111827; }
 .public-hero-copy { position: relative; z-index: 1; max-width: 37rem; }
 .eyebrow-light { color: #a5b4fc; }
 .public-hero h1 { max-width: 34rem; margin: .5rem 0 1.25rem; font-size: clamp(2.6rem, 6vw, 4.8rem); line-height: .98; letter-spacing: -.065em; }

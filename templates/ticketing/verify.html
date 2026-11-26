@@ -3,7 +3,7 @@
 {% block content %}
 <div class="row justify-content-center"><div class="col-lg-7">
   <div class="mb-4"><p class="text-uppercase text-primary small fw-semibold mb-2">Official verification</p><h1 class="display-6 fw-bold">Check a ticket</h1><p class="lead text-secondary">Scan the ticket QR code to confirm that it was officially issued and is still valid.</p></div>
-  <form id="verify-form" class="card shadow-sm p-4" novalidate>
+  <form id="verify-form" class="card shadow-sm p-4" data-async="true" novalidate>
     <div class="border rounded p-3 mb-3 bg-light">
       <div class="d-flex justify-content-between align-items-center gap-2 mb-2"><div><label class="form-label fw-semibold mb-0" for="camera-reader">Camera scanner</label><p class="small text-secondary mb-0">Allow camera access and point it at the ticket QR code.</p></div><div class="d-flex gap-2"><button class="btn btn-outline-primary btn-sm" id="start-camera" type="button">Start camera</button><button class="btn btn-outline-secondary btn-sm" id="stop-camera" type="button" disabled>Stop</button></div></div>
       <div id="camera-reader" class="d-none" aria-label="Camera QR scanner"></div>
@@ -54,7 +54,10 @@ verifyForm.addEventListener('submit', async (event) => {
     const value = document.getElementById('credential').value.trim();
     if (!value) throw new Error('Scan or enter a QR credential first.');
     const response = await fetch(`{% url 'ticketing:ticket-public-verify' %}?credential=${encodeURIComponent(value)}`);
-    const data = await response.json(); const valid = data.authentic === true;
+    let data;
+    try { data = await response.json(); } catch (_) { throw new Error('The verification service is temporarily unavailable. Please try again.'); }
+    if (!response.ok) throw new Error('The verification service could not complete the check. Please try again.');
+    const valid = data.authentic === true;
     resultBox.innerHTML = `<div class="alert ${valid ? 'alert-success' : 'alert-danger'}"><h2 class="h5">${valid ? 'Authentic ticket' : 'Ticket not valid'}</h2><p class="mb-1">Status: <strong>${escapeHtml(data.status || 'unknown')}</strong></p>${valid ? `<p class="mb-0">Event: ${escapeHtml(data.event)}<br>Reference: <span class="font-monospace">${escapeHtml(data.ticket_reference)}</span>${data.seat ? `<br>Seat: ${escapeHtml(data.seat)}` : ''}</p>` : '<p class="mb-0">Do not use this ticket for entry. Ask the issuer for help.</p>'}</div>`;
   } catch (error) { resultBox.innerHTML = `<div class="alert alert-warning">${escapeHtml(error.message || 'We could not reach the verification service. Please try again.')}</div>`; }
   button.disabled = false; spinner.classList.add('d-none');

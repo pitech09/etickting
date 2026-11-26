@@ -51,7 +51,7 @@
   {% if events %}
   <div class="row g-3">{% for event in events %}<div class="col-md-6 col-lg-4"><div class="card h-100 shadow-sm"><div class="card-body d-flex flex-column"><div class="d-flex justify-content-between gap-2"><h3 class="h5">{{ event.name }}</h3><span class="badge text-bg-light align-self-start">{{ event.get_status_display }}</span></div><p class="text-secondary small">{{ event.starts_at|date:"j M Y · H:i" }} · {{ event.organisation.name }}</p><a class="btn btn-primary mt-auto" href="{% url 'ticketing:ticket-scanner-page' event.id %}">Open scanner</a></div></div></div>{% endfor %}</div>
   {% else %}
-  <div class="alert alert-info">No events are available for your organisations yet.</div>
+  <div class="state-panel state-empty"><span class="state-icon" aria-hidden="true">◎</span><h2 class="h5">No events yet</h2><p>Your organisations do not have any events available for staff operations.</p><a class="btn btn-primary" href="{% url 'ticketing:event-list' %}">Manage events</a></div>
   {% endif %}
 </section>
 {% endblock %}
