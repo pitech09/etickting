@@ -133,7 +133,17 @@ if USE_OBJECT_STORAGE:
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "dashboard"
 LOGOUT_REDIRECT_URL = "login"
-SUPPORT_EMAIL = os.getenv("ETICKTING_SUPPORT_EMAIL", "support@etickting.local")
+SUPPORT_EMAIL = os.getenv("KENA_SUPPORT_EMAIL", os.getenv("ETICKTING_SUPPORT_EMAIL", "kena.support@gmail.com"))
+DEFAULT_FROM_EMAIL = os.getenv("DEFAULT_FROM_EMAIL", SUPPORT_EMAIL)
+EMAIL_BACKEND = os.getenv(
+    "EMAIL_BACKEND",
+    "django.core.mail.backends.console.EmailBackend" if DEBUG else "django.core.mail.backends.smtp.EmailBackend",
+)
+EMAIL_HOST = os.getenv("EMAIL_HOST", "")
+EMAIL_PORT = int(os.getenv("EMAIL_PORT", "587"))
+EMAIL_HOST_USER = os.getenv("EMAIL_HOST_USER", "")
+EMAIL_HOST_PASSWORD = os.getenv("EMAIL_HOST_PASSWORD", "")
+EMAIL_USE_TLS = os.getenv("EMAIL_USE_TLS", "true").lower() == "true"
 TEXTBEE_API_KEY = os.getenv("TEXTBEE_API_KEY", "")
 TEXTBEE_DEVICE_ID = os.getenv("TEXTBEE_DEVICE_ID", "")
 TEXTBEE_API_URL = os.getenv("TEXTBEE_API_URL", "https://api.textbee.dev/api/v1/gateway/send-sms")

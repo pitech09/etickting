@@ -1,4 +1,4 @@
-{% extends "base.html" %}{% block title %}{% if object %}Edit {{ object.name }}{% else %}Create event{% endif %} · eTickting{% endblock %}{% block content %}
+{% extends "base.html" %}{% block title %}{% if object %}Edit {{ object.name }}{% else %}Create event{% endif %} · Kena{% endblock %}{% block content %}
 <div class="row justify-content-center">
   <div class="col-lg-8">
     <div class="card shadow-sm">
@@ -17,7 +17,7 @@
             <div class="col-md-6"><label class="form-label fw-semibold">{{ form.ticket_price_maloti.label }}</label>{{ form.ticket_price_maloti }}{% if form.ticket_price_maloti.errors %}<div class="text-danger small">{{ form.ticket_price_maloti.errors }}</div>{% endif %}</div>
             <div class="col-md-6" id="ticket-quantity-field"><label class="form-label fw-semibold">{{ form.ticket_quantity.label }}</label>{{ form.ticket_quantity }}{% if form.ticket_quantity.errors %}<div class="text-danger small">{{ form.ticket_quantity.errors }}</div>{% endif %}</div>
             <div class="col-md-6"><label class="form-label fw-semibold">{{ form.ticket_max_per_customer.label }}</label>{{ form.ticket_max_per_customer }}{% if form.ticket_max_per_customer.errors %}<div class="text-danger small">{{ form.ticket_max_per_customer.errors }}</div>{% endif %}</div>
-            <div class="col-12"><h2 class="h5 mt-2 mb-0">Where is it happening?</h2><p class="text-secondary small mb-0">Enter the venue once. eTickting will save it with your organisation for this event.</p></div>
+            <div class="col-12"><h2 class="h5 mt-2 mb-0">Where is it happening?</h2><p class="text-secondary small mb-0">Enter the venue once. Kena will save it with your organisation for this event.</p></div>
             <div class="col-md-6"><label class="form-label fw-semibold">{{ form.venue_name.label }}</label>{{ form.venue_name }}{% if form.venue_name.errors %}<div class="text-danger small">{{ form.venue_name.errors }}</div>{% endif %}</div>
             <div class="col-md-6"><label class="form-label fw-semibold">{{ form.venue_city.label }}</label>{{ form.venue_city }}{% if form.venue_city.errors %}<div class="text-danger small">{{ form.venue_city.errors }}</div>{% endif %}</div>
             <div class="col-md-6"><label class="form-label fw-semibold">{{ form.venue_address_line_1.label }}</label>{{ form.venue_address_line_1 }}{% if form.venue_address_line_1.errors %}<div class="text-danger small">{{ form.venue_address_line_1.errors }}</div>{% endif %}</div>
