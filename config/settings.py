@@ -20,6 +20,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "cloudinary",
     "rest_framework",
     "accounts",
     "organisations",
@@ -85,10 +86,13 @@ USE_TZ = True
 STATIC_URL = "/static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 STATICFILES_DIRS = [BASE_DIR / "static"]
-MEDIA_URL = "media/"
+MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
+USE_CLOUDINARY_STORAGE = os.getenv(
+    "USE_CLOUDINARY_STORAGE", "false" if DEBUG else "true"
+).lower() == "true"
 USE_OBJECT_STORAGE = os.getenv("USE_OBJECT_STORAGE", "false").lower() == "true"
 STORAGES = {
     "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
@@ -96,7 +100,23 @@ STORAGES = {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"
     },
 }
-if USE_OBJECT_STORAGE:
+if USE_CLOUDINARY_STORAGE:
+    cloudinary_values = {
+        "CLOUD_NAME": os.getenv("CLOUDINARY_CLOUD_NAME", "").strip(),
+        "API_KEY": os.getenv("CLOUDINARY_API_KEY", "").strip(),
+        "API_SECRET": os.getenv("CLOUDINARY_API_SECRET", "").strip(),
+    }
+    missing_cloudinary = [name for name, value in cloudinary_values.items() if not value]
+    if missing_cloudinary:
+        raise ImproperlyConfigured(
+            "Cloudinary storage is enabled but missing: "
+            + ", ".join(f"CLOUDINARY_{name}" for name in missing_cloudinary)
+        )
+    CLOUDINARY_STORAGE = cloudinary_values
+    STORAGES["default"] = {
+        "BACKEND": "cloudinary_storage.storage.MediaCloudinaryStorage",
+    }
+elif USE_OBJECT_STORAGE:
     object_storage_bucket = os.getenv("OBJECT_STORAGE_BUCKET", "").strip()
     object_storage_access_key = os.getenv("OBJECT_STORAGE_ACCESS_KEY", "").strip()
     object_storage_secret_key = os.getenv("OBJECT_STORAGE_SECRET_KEY", "").strip()
