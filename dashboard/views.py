@@ -13,13 +13,16 @@ from django.db import transaction
 from django.db.models import Min, Q
 from django.db.models import Count, Sum
 from django.http import FileResponse
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from datetime import date
 
 from ticketing.models import Event
+from ticketing.models import Ticket
+import csv
 from payments.forms import PaymentReviewForm
-from payments.models import Payment
+from payments.models import Payment, PaymentReview
 from payments.services import confirm_payment
 
 
@@ -30,6 +33,22 @@ def organiser_required(view):
         if request.user.is_staff or request.user.is_superuser or request.user.organisation_memberships.exists():
             return view(request, *args, **kwargs)
         return redirect("customer-dashboard")
+    return wrapped
+
+
+def payment_reviewer_required(view):
+    @wraps(view)
+    @login_required
+    def wrapped(request, *args, **kwargs):
+        if request.user.is_superuser or request.user.is_staff:
+            return view(request, *args, **kwargs)
+        if not request.user.organisation_memberships.exists():
+            return redirect("customer-dashboard")
+        if not request.user.organisation_memberships.filter(
+            role__in=("owner", "event_manager")
+        ).exists():
+            raise PermissionDenied("Only organisation owners and event managers can review payments")
+        return view(request, *args, **kwargs)
     return wrapped
 
 
@@ -58,7 +77,7 @@ def platform_owner_required(view):
 def platform_dashboard(request):
     from accounts.models import User
     from audit.models import AuditLog
-    from finance.models import LedgerEntry, Payout
+    from finance.models import CommissionTransaction, LedgerEntry, Payout, PlatformCommissionConfig
     from organisations.models import Organisation, OrganisationMembership
     from orders.models import Order
     from payments.models import Payment
@@ -148,6 +167,10 @@ def platform_dashboard(request):
             "payouts_paid": Payout.objects.filter(status=Payout.Status.PAID).count(),
             "payouts_minor": Payout.objects.filter(status=Payout.Status.PAID).aggregate(total=Sum("amount_minor"))["total"] or 0,
             "ledger_transactions": LedgerEntry.objects.values("transaction_id").distinct().count(),
+            "commission_rate": PlatformCommissionConfig.current().commission_rate,
+            "commission_minor": CommissionTransaction.objects.aggregate(total=Sum("commission_minor"))["total"] or 0,
+            "commission_by_event": CommissionTransaction.objects.values("event__name", "organisation__name").annotate(total=Sum("commission_minor")).order_by("-total")[:10],
+            "commission_by_organisation": CommissionTransaction.objects.values("organisation__name").annotate(total=Sum("commission_minor")).order_by("-total")[:10],
         },
     }
     return render(request, "dashboard/platform.html", context)
@@ -212,7 +235,7 @@ def _public_events():
     )
     for event in events:
         event.starting_price_maloti = (
-            event.starting_price_minor / 100
+            event.starting_price_minor
             if event.starting_price_minor is not None
             else None
         )
@@ -305,17 +328,44 @@ def dashboard(request):
         "memberships": memberships,
         "primary_organisation": memberships.first().organisation if memberships.exists() else None,
         "events": events,
-        "metrics": {"revenue_minor": Decimal(revenue) / Decimal("100"), "revenue_maloti": Decimal(revenue) / Decimal("100"), "tickets_sold": sold, "tickets_available": available, "check_ins": checked_in, "active_events": events.filter(status__in=[Event.Status.PUBLISHED, Event.Status.SALES_OPEN]).count(), "pending_payments": pending_payments.count()},
+        "metrics": {"revenue_minor": revenue, "revenue_maloti": revenue, "tickets_sold": sold, "tickets_available": available, "check_ins": checked_in, "active_events": events.filter(status__in=[Event.Status.PUBLISHED, Event.Status.SALES_OPEN]).count(), "pending_payments": pending_payments.count()},
         "recent_orders": Order.objects.filter(event_id__in=event_ids).select_related("event", "customer")[:6],
     }
     return render(request, "dashboard/home.html", context)
 
 
 @organiser_required
+def event_attendee_export(request, event_id):
+    event = get_object_or_404(
+        Event.objects.filter(organisation__memberships__user=request.user),
+        pk=event_id,
+    )
+    response = HttpResponse(content_type="text/csv; charset=utf-8")
+    response["Content-Disposition"] = f'attachment; filename="event-{event.pk}-attendees.csv"'
+    writer = csv.writer(response)
+    writer.writerow(["ticket_reference", "attendee_name", "owner_email", "ticket_status", "seat", "admitted_at", "gate", "scanner_device"])
+    tickets = Ticket.objects.filter(event=event).select_related("owner", "admission__device").order_by("reference")
+    for ticket in tickets.iterator():
+        admission = getattr(ticket, "admission", None)
+        writer.writerow([
+            ticket.reference,
+            ticket.attendee_name,
+            ticket.owner.email,
+            ticket.status,
+            ticket.seat_label,
+            admission.admitted_at.isoformat() if admission else "",
+            admission.gate if admission else "",
+            admission.device.device_id if admission and admission.device else "",
+        ])
+    return response
+
+
+@payment_reviewer_required
 def pending_payments(request):
     """Show organiser-scoped orders awaiting payment confirmation."""
     from orders.models import Order
 
+    query = request.GET.get("q", "").strip()
     orders = (
         Order.objects.filter(
             event__organisation__memberships__user=request.user,
@@ -325,15 +375,19 @@ def pending_payments(request):
         .prefetch_related("payments")
         .order_by("created_at")
     )
-    return render(request, "dashboard/pending_payments.html", {"orders": orders})
+    if query:
+        orders = orders.filter(
+            Q(reference__icontains=query) | Q(payments__provider_reference__icontains=query)
+        ).distinct()
+    return render(request, "dashboard/pending_payments.html", {"orders": orders, "query": query})
 
 
-@organiser_required
+@payment_reviewer_required
 def review_payment(request, payment_id):
     if request.method != "POST":
         return redirect("pending-payments")
     payment = get_object_or_404(
-        Payment.objects.select_related("order__event__organisation"),
+        Payment.objects.select_related("order__event__organisation", "payment_method"),
         pk=payment_id,
         order__event__organisation__memberships__user=request.user,
     )
@@ -343,18 +397,24 @@ def review_payment(request, payment_id):
         return redirect("pending-payments")
     note = form.cleaned_data["review_note"].strip()
     decision = form.cleaned_data["decision"]
-    if payment.status not in {Payment.Status.PENDING, Payment.Status.INITIATED}:
-        messages.error(request, "This payment has already been reviewed.")
-        return redirect("pending-payments")
     try:
         with transaction.atomic():
+            payment = Payment.objects.select_for_update().select_related("order").get(pk=payment.pk)
+            if payment.status not in {Payment.Status.PENDING, Payment.Status.INITIATED}:
+                raise ValueError("This payment has already been reviewed.")
+            previous_status = payment.status
+            received_amount_minor = None
+            if form.cleaned_data.get("received_amount_maloti") is not None:
+                received_amount_minor = form.cleaned_data["received_amount_maloti"]
             if decision == "approve":
                 confirm_payment(
                     payment_id=payment.pk,
                     provider_reference=payment.provider_reference,
                     response={"method": "manual_review", "note": note},
+                    received_amount_minor=received_amount_minor,
                 )
                 message = "Payment approved and tickets issued."
+                resulting_status = Payment.Status.SUCCESSFUL
             else:
                 payment.mark_failed(reason=note or "Rejected during manual review")
                 payment.order.status = payment.order.Status.FAILED
@@ -363,10 +423,22 @@ def review_payment(request, payment_id):
                     status="released", updated_at=timezone.now()
                 )
                 message = "Payment rejected and the order was marked failed."
+                resulting_status = Payment.Status.FAILED
             payment.reviewed_at = timezone.now()
             payment.reviewed_by = request.user
             payment.review_note = note
             payment.save(update_fields=["reviewed_at", "reviewed_by", "review_note", "updated_at"])
+            PaymentReview.objects.create(
+                payment=payment,
+                reviewer=request.user,
+                decision=PaymentReview.Decision.APPROVED if decision == "approve" else PaymentReview.Decision.REJECTED,
+                previous_status=previous_status,
+                resulting_status=resulting_status,
+                received_amount_minor=received_amount_minor,
+                note=note,
+            )
+            from audit.services import record
+            record(action=f"payment_{decision}", actor=request.user, obj=payment, metadata={"order": payment.order.reference, "note": note})
     except ValueError as exc:
         messages.error(request, str(exc))
     else:
@@ -374,7 +446,7 @@ def review_payment(request, payment_id):
     return redirect("pending-payments")
 
 
-@organiser_required
+@payment_reviewer_required
 def payment_proof(request, payment_id):
     payment = get_object_or_404(
         Payment,

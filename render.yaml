@@ -41,6 +41,12 @@ services:
         sync: false
       - key: OBJECT_STORAGE_QUERYSTRING_AUTH
         value: "true"
+      - key: TEXTBEE_API_KEY
+        sync: false
+      - key: TEXTBEE_DEVICE_ID
+        sync: false
+      - key: TEXTBEE_API_URL
+        value: https://api.textbee.dev/api/v1/gateway/send-sms
       - key: TICKETING_SIGNING_KEYS
         sync: false
       - key: TICKETING_VERIFY_KEYS

@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
@@ -45,14 +46,24 @@ class Payment(models.Model):
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING
     )
-    amount_minor = models.PositiveIntegerField(
-        help_text="Amount payable in minor currency units"
-    )
+    amount_minor = models.DecimalField(max_digits=12, decimal_places=2, help_text="Amount payable in Maloti")
     currency = models.CharField(max_length=3, default="LSL")
     provider_reference = models.CharField(
         max_length=200,
         blank=True,
         help_text="Transaction reference from the payment provider",
+    )
+    sender_phone = models.CharField(
+        max_length=40,
+        blank=True,
+        help_text="Customer mobile number used to make a manual payment",
+    )
+    received_amount_minor = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        help_text="Amount confirmed against the mobile money transaction by a reviewer in Maloti",
     )
     proof_image = models.ImageField(
         upload_to="payment-proofs/%Y/%m/",
@@ -91,10 +102,21 @@ class Payment(models.Model):
                 condition=models.Q(idempotency_key__isnull=False)
                 & ~models.Q(idempotency_key=""),
             ),
+            models.UniqueConstraint(
+                fields=("provider", "provider_reference"),
+                name="unique_provider_transaction_reference",
+                condition=models.Q(provider_reference__isnull=False)
+                & ~models.Q(provider_reference=""),
+            ),
         ]
 
     def __str__(self):
         return f"{self.reference_short} — {self.get_status_display()}"
+
+    def save(self, *args, **kwargs):
+        if self.provider_reference:
+            self.provider_reference = self.provider_reference.strip().upper()
+        super().save(*args, **kwargs)
 
     @property
     def reference_short(self):
@@ -104,7 +126,7 @@ class Payment(models.Model):
     def is_successful(self):
         return self.status == self.Status.SUCCESSFUL
 
-    def mark_successful(self, provider_reference=None, response=None):
+    def mark_successful(self, provider_reference=None, response=None, received_amount_minor=None):
         """Mark payment successful — only called from verified provider callbacks."""
         if self.status != self.Status.PENDING and self.status != self.Status.INITIATED:
             return False
@@ -113,16 +135,13 @@ class Payment(models.Model):
             self.provider_reference = provider_reference
         if response is not None:
             self.provider_response = response or {}
+        if received_amount_minor is not None:
+            self.received_amount_minor = received_amount_minor
         self.callback_processed_at = timezone.now()
-        self.save(
-            update_fields=[
-                "status",
-                "provider_reference",
-                "provider_response",
-                "callback_processed_at",
-                "updated_at",
-            ]
-        )
+        update_fields = ["status", "provider_reference", "provider_response", "callback_processed_at", "updated_at"]
+        if received_amount_minor is not None:
+            update_fields.append("received_amount_minor")
+        self.save(update_fields=update_fields)
         return True
 
     def mark_failed(self, reason=None, response=None):
@@ -165,3 +184,23 @@ class PaymentProviderRegistry:
     @classmethod
     def all(cls):
         return list(cls._providers.keys())
+
+
+class PaymentReview(models.Model):
+    """Append-only record of every manual payment decision."""
+
+    class Decision(models.TextChoices):
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+
+    payment = models.ForeignKey(Payment, on_delete=models.PROTECT, related_name="review_history")
+    reviewer = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    decision = models.CharField(max_length=20, choices=Decision.choices)
+    previous_status = models.CharField(max_length=20)
+    resulting_status = models.CharField(max_length=20)
+    received_amount_minor = models.PositiveIntegerField(null=True, blank=True)
+    note = models.TextField(blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)

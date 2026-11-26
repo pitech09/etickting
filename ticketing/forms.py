@@ -89,7 +89,7 @@ class EventForm(forms.ModelForm):
         if category:
             self.initial.update({
                 "ticket_name": category.name,
-                "ticket_price_maloti": Decimal(category.price_minor) / Decimal("100"),
+                "ticket_price_maloti": category.price_minor,
                 "ticket_quantity": category.total_quantity,
                 "ticket_max_per_customer": category.max_per_customer,
             })
@@ -135,7 +135,7 @@ class TicketCategoryForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         if self.instance and self.instance.pk:
-            self.initial["price_maloti"] = Decimal(self.instance.price_minor) / Decimal("100")
+            self.initial["price_maloti"] = self.instance.price_minor
 
     class Meta:
         model = TicketCategory

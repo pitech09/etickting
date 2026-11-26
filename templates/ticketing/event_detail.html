@@ -62,12 +62,10 @@
           <p>{{ event.description|linebreaks }}</p>
         </div>
         {% endif %}
-        {% if event.refund_policy %}
         <div class="mt-4">
-          <h2 class="h4 mb-3">Refund policy</h2>
-          <p>{{ event.refund_policy|linebreaks }}</p>
+          <h2 class="h4 mb-3">Online ticket policy</h2>
+          <p>Online tickets are non-refundable.</p>
         </div>
-        {% endif %}
         {% if event.resale_policy %}
         <div class="mt-4">
           <h2 class="h4 mb-3">Resale policy</h2>

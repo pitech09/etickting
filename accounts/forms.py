@@ -2,7 +2,6 @@ from django import forms
 from django.contrib.auth.forms import UserCreationForm
 
 from .models import User
-from organisations.forms import OrganisationForm
 
 
 class RegistrationForm(UserCreationForm):
@@ -26,7 +25,7 @@ class OrganiserRegistrationForm(RegistrationForm):
 class AccountDetailsForm(forms.ModelForm):
     class Meta:
         model = User
-        fields = ("first_name", "last_name", "email")
+        fields = ("first_name", "last_name", "email", "phone_number")
 
     def clean_email(self):
         email = self.cleaned_data["email"].strip().lower()

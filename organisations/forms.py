@@ -37,7 +37,7 @@ class OrganisationForm(forms.ModelForm):
 class OrganisationPaymentMethodForm(forms.ModelForm):
     class Meta:
         model = OrganisationPaymentMethod
-        fields = ("provider", "label", "account_number", "instructions", "is_active", "sort_order")
+        fields = ("provider", "label", "account_name", "account_number", "instructions", "is_active", "sort_order")
         widgets = {"instructions": forms.Textarea(attrs={"rows": 3})}
 
     def clean_label(self):

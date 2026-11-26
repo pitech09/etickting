@@ -2,10 +2,12 @@ import base64
 from io import BytesIO
 import json
 from datetime import timedelta
+from unittest import skipUnless
 from unittest.mock import patch
 
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
-from django.test import TestCase, override_settings
+from django.db import connection
+from django.test import TestCase, TransactionTestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from PIL import Image
@@ -15,7 +17,7 @@ from organisations.models import Organisation, OrganisationMembership
 from seating.models import EventSeating, Seat
 
 from .inventory import inventory_snapshot
-from .models import Admission, Event, ResaleListing, ScanAttempt, ScannerDevice, Ticket, TicketCategory, TicketCredential
+from .models import Admission, AdmissionReversal, Event, ResaleListing, ScanAttempt, ScannerDevice, Ticket, TicketCategory, TicketCredential
 from .services import admit_ticket, create_resale_listing, issue_ticket, purchase_resale, transfer_ticket, verify_credential
 from .key_management import signing_keys
 
@@ -112,6 +114,86 @@ class TicketAuthenticityTests(TestCase):
         self.assertEqual(ScanAttempt.objects.filter(result=ScanAttempt.Result.USED).count(), 1)
         self.assertEqual(first.owner_id, self.owner.id)
 
+    def test_pre_event_scan_verifies_without_admitting(self):
+        self.event.starts_at = timezone.now() + timedelta(hours=1)
+        self.event.save(update_fields=["starts_at"])
+        _, credential = self.issue()
+
+        ticket, result = admit_ticket(
+            credential=credential, event=self.event, user=self.staff, device_id=self.device.device_id
+        )
+
+        self.assertEqual(result, "verified_not_started")
+        self.assertEqual(ticket.status, Ticket.Status.ISSUED)
+        self.assertFalse(Admission.objects.filter(ticket=ticket).exists())
+        attempt = ScanAttempt.objects.get(ticket=ticket)
+        self.assertEqual(attempt.kind, ScanAttempt.Kind.VERIFICATION)
+        self.assertEqual(attempt.result, ScanAttempt.Result.VERIFIED)
+        self.assertEqual(attempt.reason, "event_not_started")
+
+    def test_repeated_pre_event_verification_never_counts_as_attendance(self):
+        self.event.starts_at = timezone.now() + timedelta(hours=1)
+        self.event.save(update_fields=["starts_at"])
+        _, credential = self.issue()
+
+        self.assertEqual(admit_ticket(credential=credential, event=self.event, user=self.staff, device_id=self.device.device_id)[1], "verified_not_started")
+        self.assertEqual(admit_ticket(credential=credential, event=self.event, user=self.staff, device_id=self.device.device_id)[1], "verified_not_started")
+        self.assertEqual(Admission.objects.count(), 0)
+        self.assertEqual(ScanAttempt.objects.filter(ticket__isnull=False).count(), 2)
+
+    def test_scan_after_event_start_admits_ticket(self):
+        self.event.starts_at = timezone.now() - timedelta(minutes=1)
+        self.event.save(update_fields=["starts_at"])
+        _, credential = self.issue()
+
+        ticket, result = admit_ticket(
+            credential=credential, event=self.event, user=self.staff, device_id=self.device.device_id, gate="Main entrance"
+        )
+
+        self.assertEqual(result, "valid")
+        self.assertEqual(ticket.status, Ticket.Status.ADMITTED)
+        admission = Admission.objects.get(ticket=ticket)
+        self.assertEqual(admission.device_id, self.device.id)
+        self.assertEqual(admission.gate, "Main entrance")
+        self.assertEqual(ScanAttempt.objects.get(ticket=ticket).kind, ScanAttempt.Kind.ADMISSION)
+
+    def test_already_admitted_scan_preserves_original_admission_details(self):
+        self.event.starts_at = timezone.now() - timedelta(minutes=1)
+        self.event.save(update_fields=["starts_at"])
+        ticket, credential = self.issue()
+        admit_ticket(credential=credential, event=self.event, user=self.staff, device_id=self.device.device_id, gate="Gate A")
+
+        _, result = admit_ticket(credential=credential, event=self.event, user=self.staff, device_id=self.device.device_id, gate="Gate B")
+
+        self.assertEqual(result, "used")
+        admission = Admission.objects.get(ticket=ticket)
+        self.assertEqual(admission.gate, "Gate A")
+        self.assertEqual(Admission.objects.count(), 1)
+
+    def test_cancelled_event_and_ended_event_do_not_admit(self):
+        ticket, credential = self.issue()
+        self.event.status = Event.Status.CANCELLED
+        self.event.save(update_fields=["status"])
+        ticket, result = admit_ticket(credential=credential, event=self.event, user=self.staff, device_id=self.device.device_id)
+        self.assertEqual(result, "event_cancelled")
+        self.assertEqual(ticket.status, Ticket.Status.ISSUED)
+        self.assertEqual(Admission.objects.count(), 0)
+
+        self.event.status = Event.Status.PUBLISHED
+        self.event.starts_at = timezone.now() - timedelta(hours=3)
+        self.event.ends_at = timezone.now() - timedelta(hours=1)
+        self.event.save(update_fields=["status", "starts_at", "ends_at"])
+        self.assertEqual(admit_ticket(credential=credential, event=self.event, user=self.staff, device_id=self.device.device_id)[1], "event_ended")
+        self.assertEqual(Admission.objects.count(), 0)
+
+    def test_wrong_event_and_revoked_credential_are_denied(self):
+        ticket, credential = self.issue()
+        other_event = Event.objects.create(organisation=self.organisation, name="Other Event", starts_at=timezone.now(), status=Event.Status.PUBLISHED)
+        other_device = ScannerDevice.objects.create(device_id="scanner-other", event=other_event, user=self.staff)
+        self.assertEqual(admit_ticket(credential=credential, event=other_event, user=self.staff, device_id=other_device.device_id)[1], "wrong_event")
+        ticket.credentials.update(state=TicketCredential.State.REVOKED)
+        self.assertEqual(admit_ticket(credential=credential, event=self.event, user=self.staff, device_id=self.device.device_id)[1], "revoked")
+
     def test_reentry_policy_records_reentry_without_issuing_a_second_admission(self):
         self.event.admission_policy = "reentry"
         self.event.save(update_fields=["admission_policy"])
@@ -176,6 +258,84 @@ class TicketAuthenticityTests(TestCase):
         self.assertContains(response, "Verified Night")
         self.client.force_login(self.owner)
         self.assertEqual(self.client.get(reverse("ticketing:ticket-scanner-page", args=[self.event.id])).status_code, 404)
+
+    def test_staff_can_search_event_attendees_without_receiving_credentials(self):
+        ticket, credential = self.issue()
+        ticket.attendee_name = "Mpho Searchable"
+        ticket.save(update_fields=["attendee_name", "updated_at"])
+        self.client.force_login(self.staff)
+
+        response = self.client.get(
+            reverse("ticketing:ticket-attendee-search", args=[self.event.id]),
+            {"q": "Mpho"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["results"][0]["reference"], ticket.reference)
+        self.assertNotIn(credential, response.content.decode())
+
+    def test_manual_admission_uses_the_same_authoritative_admission_path(self):
+        self.event.starts_at = timezone.now() - timedelta(minutes=1)
+        self.event.save(update_fields=["starts_at"])
+        ticket, _ = self.issue()
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("ticketing:ticket-manual-admit", args=[self.event.id]),
+            {"ticket_id": str(ticket.pk)},
+            HTTP_X_SCANNER_DEVICE=self.device.device_id,
+            HTTP_X_SCANNER_GATE="Manual desk",
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["status"], "valid")
+        self.assertEqual(Admission.objects.get(ticket=ticket).gate, "Manual desk")
+        self.assertEqual(ScanAttempt.objects.get(ticket=ticket).kind, ScanAttempt.Kind.ADMISSION)
+
+    def test_attendee_search_is_scoped_to_event_staff_membership(self):
+        self.client.force_login(self.other)
+        response = self.client.get(
+            reverse("ticketing:ticket-attendee-search", args=[self.event.id]),
+            {"q": "anything"},
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_event_manager_can_reverse_admission_with_immutable_history(self):
+        self.event.starts_at = timezone.now() - timedelta(minutes=1)
+        self.event.save(update_fields=["starts_at"])
+        ticket, credential = self.issue()
+        admit_ticket(credential=credential, event=self.event, user=self.staff, device_id=self.device.device_id, gate="Main")
+        membership = OrganisationMembership.objects.get(organisation=self.organisation, user=self.staff)
+        membership.role = OrganisationMembership.Role.EVENT_MANAGER
+        membership.save(update_fields=["role"])
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("ticketing:ticket-admission-reverse", args=[self.event.id]),
+            {"ticket_id": str(ticket.pk), "reason": "Accidental duplicate scan"},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(Ticket.objects.get(pk=ticket.pk).status, Ticket.Status.ISSUED)
+        self.assertFalse(Admission.objects.filter(ticket=ticket).exists())
+        reversal = AdmissionReversal.objects.get(ticket=ticket)
+        self.assertEqual(reversal.original_gate, "Main")
+        self.assertEqual(reversal.reason, "Accidental duplicate scan")
+
+    def test_event_staff_cannot_reverse_admission(self):
+        self.event.starts_at = timezone.now() - timedelta(minutes=1)
+        self.event.save(update_fields=["starts_at"])
+        ticket, credential = self.issue()
+        admit_ticket(credential=credential, event=self.event, user=self.staff, device_id=self.device.device_id)
+        self.client.force_login(self.staff)
+
+        response = self.client.post(
+            reverse("ticketing:ticket-admission-reverse", args=[self.event.id]),
+            {"ticket_id": str(ticket.pk), "reason": "Not authorised"},
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertTrue(Admission.objects.filter(ticket=ticket).exists())
 
     def test_inventory_dashboard_is_organisation_scoped_and_reports_ga_sales(self):
         category = TicketCategory.objects.create(event=self.event, name="General", price_minor=2500, total_quantity=10)

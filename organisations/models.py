@@ -37,6 +37,11 @@ class OrganisationPaymentMethod(models.Model):
     )
     provider = models.CharField(max_length=20, choices=Provider.choices)
     label = models.CharField(max_length=100, help_text="Short name customers will recognise")
+    account_name = models.CharField(
+        max_length=180,
+        blank=True,
+        help_text="The registered name shown to customers for this payment destination",
+    )
     account_number = models.CharField(max_length=120, help_text="Number, merchant code or account identifier")
     instructions = models.TextField(blank=True)
     is_active = models.BooleanField(default=True)

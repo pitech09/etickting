@@ -3,7 +3,49 @@ from decimal import Decimal
 
 from django.conf import settings
 from django.core.exceptions import ValidationError
+from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
+
+
+class PlatformCommissionConfig(models.Model):
+    """Current platform commission setting; historical sales snapshot the rate."""
+
+    commission_rate = models.DecimalField(
+        max_digits=5,
+        decimal_places=2,
+        default=Decimal("0.00"),
+        validators=[MinValueValidator(Decimal("0.00")), MaxValueValidator(Decimal("100.00"))],
+    )
+    updated_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    @classmethod
+    def current(cls):
+        config, _ = cls.objects.get_or_create(pk=1)
+        return config
+
+
+class CommissionTransaction(models.Model):
+    """Immutable commission snapshot for one successful ticket sale."""
+
+    order = models.OneToOneField("orders.Order", on_delete=models.PROTECT, related_name="commission_transaction")
+    payment = models.OneToOneField("payments.Payment", on_delete=models.PROTECT, related_name="commission_transaction")
+    organisation = models.ForeignKey("organisations.Organisation", on_delete=models.PROTECT, related_name="commission_transactions")
+    event = models.ForeignKey("ticketing.Event", on_delete=models.PROTECT, related_name="commission_transactions")
+    gross_ticket_sales_minor = models.DecimalField(max_digits=12, decimal_places=2)
+    commission_rate = models.DecimalField(max_digits=5, decimal_places=2)
+    commission_minor = models.DecimalField(max_digits=12, decimal_places=2)
+    provider_cost_minor = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    organiser_net_minor = models.DecimalField(max_digits=12, decimal_places=2)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)
+
+    def save(self, *args, **kwargs):
+        if self.pk and CommissionTransaction.objects.filter(pk=self.pk).exists():
+            raise ValidationError("Commission transactions are immutable")
+        super().save(*args, **kwargs)
 
 
 class FinancialTransaction(models.Model):
@@ -18,8 +60,8 @@ class FinancialTransaction(models.Model):
 class LedgerEntry(models.Model):
     transaction = models.ForeignKey(FinancialTransaction, on_delete=models.PROTECT, related_name="entries")
     account = models.CharField(max_length=100)
-    debit_minor = models.PositiveIntegerField(default=0)
-    credit_minor = models.PositiveIntegerField(default=0)
+    debit_minor = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    credit_minor = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
     created_at = models.DateTimeField(auto_now_add=True)
 
     def clean(self):
@@ -37,7 +79,7 @@ class Payout(models.Model):
         FAILED = "failed", "Failed"
 
     organisation = models.ForeignKey("organisations.Organisation", on_delete=models.PROTECT, related_name="payouts")
-    amount_minor = models.PositiveIntegerField()
+    amount_minor = models.DecimalField(max_digits=12, decimal_places=2)
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.PENDING)
     provider_reference = models.CharField(max_length=160, blank=True)
     idempotency_key = models.CharField(max_length=128, unique=True)
@@ -48,4 +90,4 @@ class Payout(models.Model):
 
     @property
     def amount_maloti(self):
-        return Decimal(self.amount_minor) / Decimal("100")
+        return self.amount_minor

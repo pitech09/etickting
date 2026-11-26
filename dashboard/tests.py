@@ -9,7 +9,7 @@ from accounts.models import User
 from organisations.models import Organisation, OrganisationMembership
 from organisations.models import OrganisationPaymentMethod
 from orders.models import Order
-from payments.models import Payment
+from payments.models import Payment, PaymentReview
 from ticketing.models import Event
 
 
@@ -74,6 +74,7 @@ class PendingPaymentsDashboardTests(TestCase):
             {
                 "payment_method": str(self.payment_method.pk),
                 "provider_reference": "MPESA-12345",
+                "sender_phone": "+26650123456",
                 "proof_image": SimpleUploadedFile(
                     "proof.png",
                     base64.b64decode(
@@ -92,11 +93,123 @@ class PendingPaymentsDashboardTests(TestCase):
         self.client.force_login(self.organiser)
         response = self.client.post(
             reverse("review-payment", args=[payment.pk]),
-            {"decision": "approve", "review_note": "Payment matched."},
+            {"decision": "approve", "received_amount_maloti": "25.00", "review_note": "Payment matched."},
         )
         self.assertRedirects(response, reverse("pending-payments"))
-        self.assertEqual(payment.__class__.objects.get(pk=payment.pk).status, Payment.Status.SUCCESSFUL)
+        payment = payment.__class__.objects.get(pk=payment.pk)
+        self.assertEqual(payment.status, Payment.Status.SUCCESSFUL)
         self.assertEqual(Order.objects.get(pk=self.order.pk).status, Order.Status.PAID)
+        self.assertEqual(payment.sender_phone, "+26650123456")
+        self.assertEqual(payment.received_amount_minor, 2500)
+        self.assertEqual(payment.review_history.count(), 1)
+
+    def test_customer_can_check_payment_status(self):
+        self.client.force_login(self.customer)
+        response = self.client.get(reverse("orders:payment-status", args=[self.order.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["order_reference"], self.order.reference)
+        self.assertEqual(response.json()["payment_status"], "not_submitted")
+
+    def test_customer_can_submit_manual_ecocash_payment(self):
+        self.client.force_login(self.customer)
+        response = self.client.post(
+            reverse("orders:order-detail", args=[self.order.pk]),
+            {
+                "payment_method": str(self.second_payment_method.pk),
+                "provider_reference": "ecocash-123",
+                "sender_phone": "+26650123456",
+            },
+        )
+        self.assertEqual(response.status_code, 302)
+        payment = self.order.payments.get()
+        self.assertEqual(payment.provider, Payment.Provider.ECOCASH)
+        self.assertEqual(payment.provider_reference, "ECOCASH-123")
+
+    def test_expired_order_cannot_receive_a_manual_payment_submission(self):
+        self.order.status = Order.Status.EXPIRED
+        self.order.save(update_fields=["status", "updated_at"])
+        self.client.force_login(self.customer)
+        response = self.client.post(
+            reverse("orders:order-detail", args=[self.order.pk]),
+            {
+                "payment_method": str(self.payment_method.pk),
+                "provider_reference": "EXPIRED-1",
+                "sender_phone": "+26650123456",
+            },
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Payment.objects.filter(order=self.order).exists())
+
+    def test_duplicate_transaction_reference_is_rejected(self):
+        from payments.forms import ManualPaymentForm
+
+        Payment.objects.create(
+            order=self.order,
+            payment_method=self.payment_method,
+            provider=Payment.Provider.MPESA,
+            provider_reference="DUPLICATE-1",
+            amount_minor=self.order.total_minor,
+        )
+        form = ManualPaymentForm(
+            data={
+                "payment_method": str(self.payment_method.pk),
+                "provider_reference": "duplicate-1",
+                "sender_phone": "+26650123456",
+            },
+            organisation=self.event.organisation,
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("already been submitted", str(form.errors))
+
+    def test_incorrect_verified_amount_does_not_approve_payment(self):
+        self.client.force_login(self.customer)
+        self.client.post(
+            reverse("orders:order-detail", args=[self.order.pk]),
+            {
+                "payment_method": str(self.payment_method.pk),
+                "provider_reference": "MPESA-WRONG-AMOUNT",
+                "sender_phone": "+26650123456",
+            },
+        )
+        payment = self.order.payments.get()
+        self.client.force_login(self.organiser)
+        self.client.post(
+            reverse("review-payment", args=[payment.pk]),
+            {"decision": "approve", "received_amount_maloti": "20.00"},
+        )
+        self.assertEqual(Payment.objects.get(pk=payment.pk).status, Payment.Status.PENDING)
+        self.assertEqual(PaymentReview.objects.filter(payment=payment).count(), 0)
+
+    def test_event_staff_cannot_review_payments(self):
+        staff = User.objects.create_user(email="event-staff@example.com", password="pass-12345")
+        OrganisationMembership.objects.create(
+            organisation=self.order.event.organisation,
+            user=staff,
+            role="event_staff",
+        )
+        self.client.force_login(staff)
+        response = self.client.get(reverse("pending-payments"))
+        self.assertEqual(response.status_code, 403)
+
+    def test_rejected_payment_creates_review_history(self):
+        payment = Payment.objects.create(
+            order=self.order,
+            payment_method=self.payment_method,
+            provider=Payment.Provider.MPESA,
+            provider_reference="MPESA-REJECT-1",
+            amount_minor=self.order.total_minor,
+            sender_phone="+26650123456",
+        )
+        self.client.force_login(self.organiser)
+        response = self.client.post(
+            reverse("review-payment", args=[payment.pk]),
+            {"decision": "reject", "review_note": "Reference not found in provider records."},
+        )
+        self.assertEqual(response.status_code, 302)
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.FAILED)
+        review = payment.review_history.get()
+        self.assertEqual(review.decision, PaymentReview.Decision.REJECTED)
 
     def test_organiser_cannot_start_customer_checkout(self):
         self.client.force_login(self.organiser)
@@ -140,6 +253,45 @@ class PendingPaymentsDashboardTests(TestCase):
 
         self.assertContains(response, self.event.name)
         self.assertContains(response, category.name)
+
+    def test_organiser_can_download_event_attendee_and_admission_report(self):
+        from ticketing.models import Admission, Ticket
+
+        ticket = Ticket.objects.create(
+            event=self.event,
+            owner=self.customer,
+            reference="REPORT-1",
+            attendee_name="Report Attendee",
+            payment_verified_at=timezone.now(),
+        )
+        Admission.objects.create(
+            ticket=ticket,
+            event=self.event,
+            admitted_by=self.organiser,
+            gate="North gate",
+        )
+        self.client.force_login(self.organiser)
+
+        response = self.client.get(reverse("event-attendee-export", args=[self.event.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("text/csv", response["Content-Type"])
+        body = response.content.decode()
+        self.assertIn("REPORT-1", body)
+        self.assertIn("Report Attendee", body)
+        self.assertIn("North gate", body)
+
+    def test_organiser_report_cannot_cross_organisation_boundaries(self):
+        other = User.objects.create_user(email="other-organiser@example.com", password="pass-12345")
+        other_organisation = Organisation.objects.create(name="Other Events", slug="other-events")
+        OrganisationMembership.objects.create(
+            organisation=other_organisation,
+            user=other,
+            role=OrganisationMembership.Role.OWNER,
+        )
+        self.client.force_login(other)
+        response = self.client.get(reverse("event-attendee-export", args=[self.event.pk]))
+        self.assertEqual(response.status_code, 404)
 
 
 class PlatformDashboardTests(TestCase):

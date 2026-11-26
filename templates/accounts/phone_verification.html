@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block title %}Verify phone · eTickting{% endblock %}
+{% block content %}
+<div class="row justify-content-center"><div class="col-lg-6"><div class="page-intro"><p class="eyebrow mb-2">Account security</p><h1 class="h2">Verify your phone</h1><p class="text-secondary">We will send a one-time code by SMS. Codes expire quickly and can only be used once.</p></div><section class="card card-body"><form method="post" class="form-system">{% csrf_token %}<label class="form-label" for="phone">Phone number</label><input class="form-control" id="phone" name="phone" value="{{ phone }}" placeholder="+266 5XXX XXXX" required><button class="btn btn-primary mt-3" type="submit">Send verification code</button></form><hr><form method="post" class="form-system"><input type="hidden" name="phone" value="{{ phone }}">{% csrf_token %}<label class="form-label" for="code">Verification code</label><input class="form-control" id="code" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" maxlength="6" required><button class="btn btn-outline-primary mt-3" type="submit">Verify phone</button></form></section></div></div>
+{% endblock %}

@@ -1,3 +1,5 @@
+import uuid
+
 from django.contrib.auth.base_user import BaseUserManager
 from django.contrib.auth.models import AbstractUser
 from django.db import models
@@ -27,9 +29,30 @@ class User(AbstractUser):
 
     username = None
     email = models.EmailField(unique=True)
+    phone_number = models.CharField(max_length=20, unique=True, null=True, blank=True)
+    phone_verified_at = models.DateTimeField(null=True, blank=True)
     USERNAME_FIELD = "email"
     REQUIRED_FIELDS = []
     objects = UserManager()
 
     def __str__(self):
         return self.email
+
+
+class PhoneOTP(models.Model):
+    class Purpose(models.TextChoices):
+        PHONE_VERIFICATION = "phone_verification", "Phone verification"
+        PASSWORD_RESET = "password_reset", "Password reset"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    user = models.ForeignKey(User, on_delete=models.CASCADE, related_name="phone_otps")
+    phone_number = models.CharField(max_length=20)
+    purpose = models.CharField(max_length=30, choices=Purpose.choices)
+    code_hash = models.CharField(max_length=128)
+    attempts = models.PositiveSmallIntegerField(default=0)
+    expires_at = models.DateTimeField()
+    consumed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ("-created_at",)

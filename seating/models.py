@@ -22,9 +22,9 @@ class SeatingSection(models.Model):
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
     color = models.CharField(max_length=7, default="#6c757d", help_text="Hex color for seating map")
-    price_modifier_minor = models.IntegerField(
-        default=0,
-        help_text="Additional charge in minor currency units for this section",
+    price_modifier_minor = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal("0.00"),
+        help_text="Additional charge in Maloti for this section",
     )
     is_accessible = models.BooleanField(
         default=False, help_text="Wheelchair-accessible section"
@@ -47,7 +47,7 @@ class SeatingSection(models.Model):
 
     @property
     def price_modifier_maloti(self):
-        return Decimal(self.price_modifier_minor) / Decimal("100")
+        return self.price_modifier_minor
 
 
 class SeatingRow(models.Model):

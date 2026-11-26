@@ -20,6 +20,9 @@ from .views import (
     public_verify_page,
     scan,
     scanner_page,
+    attendee_search,
+    manual_admit,
+    reverse_manual_admission,
 )
 from .wallet import ticket_detail, ticket_qr, update_attendee, wallet
 from .offline import reconcile_offline_scans, upload_offline_scans
@@ -50,6 +53,9 @@ urlpatterns = [
     path("verify/", public_verify, name="ticket-public-verify"),
     path("events/<uuid:event_id>/scan/console/", scanner_page, name="ticket-scanner-page"),
     path("events/<uuid:event_id>/scan/", scan, name="ticket-scan"),
+    path("events/<uuid:event_id>/scan/search/", attendee_search, name="ticket-attendee-search"),
+    path("events/<uuid:event_id>/scan/manual-admit/", manual_admit, name="ticket-manual-admit"),
+    path("events/<uuid:event_id>/scan/reverse/", reverse_manual_admission, name="ticket-admission-reverse"),
     path("events/<uuid:event_id>/scan/offline/", upload_offline_scans, name="ticket-offline-upload"),
     path("scan/offline/<uuid:batch_id>/reconcile/", reconcile_offline_scans, name="ticket-offline-reconcile"),
     path(

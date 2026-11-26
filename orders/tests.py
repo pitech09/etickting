@@ -11,7 +11,9 @@ from ticketing.models import Event, Ticket, TicketCategory
 from venues.models import Venue
 
 from .fulfillment import fulfill_paid_order
-from .models import Order, OrderLine
+from .models import InventoryHold, Order, OrderLine
+from .services import expire_order_if_holds_expired
+from finance.models import PlatformCommissionConfig
 
 
 class CheckoutCorrectnessTests(TestCase):
@@ -41,6 +43,24 @@ class CheckoutCorrectnessTests(TestCase):
         self.assertEqual(Order.objects.filter(customer=self.customer).count(), 1)
         self.assertRedirects(second, first["Location"])
 
+    def test_new_checkout_has_no_customer_fee_and_snapshots_commission(self):
+        config = PlatformCommissionConfig.current()
+        config.commission_rate = "10.00"
+        config.save(update_fields=["commission_rate", "updated_at"])
+        response = self.client.post(
+            reverse("orders:order-create", args=[self.event.pk]),
+            {"ticket_category": str(self.category.pk), "quantity": "1", "idempotency_key": "commission-checkout"},
+        )
+        order = Order.objects.get(customer=self.customer)
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(order.subtotal_minor, 2500)
+        self.assertEqual(order.total_minor, 2500)
+        self.assertEqual(order.fee_minor, 0)
+        self.assertEqual(order.commission_minor, 250)
+        detail = self.client.get(response["Location"])
+        self.assertNotContains(detail, "Service fee")
+        self.assertContains(detail, "M 25.00")
+
     def test_category_sales_window_is_enforced(self):
         self.category.sales_opens_at = timezone.now() + timedelta(hours=1)
         self.category.save(update_fields=["sales_opens_at"])
@@ -53,6 +73,20 @@ class CheckoutCorrectnessTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertContains(response, "not on sale yet")
         self.assertFalse(Order.objects.filter(customer=self.customer).exists())
+
+    def test_pending_order_expires_after_its_inventory_hold_ends(self):
+        order = Order.objects.create(customer=self.customer, event=self.event, total_minor=2500)
+        InventoryHold.objects.create(
+            order=order,
+            ticket_category=self.category,
+            quantity=1,
+            expires_at=timezone.now() - timedelta(minutes=1),
+        )
+
+        self.assertTrue(expire_order_if_holds_expired(order))
+        order.refresh_from_db()
+        self.assertEqual(order.status, Order.Status.EXPIRED)
+        self.assertEqual(order.inventory_holds.get().status, InventoryHold.Status.EXPIRED)
 
 
 class SeatFulfillmentTests(TestCase):

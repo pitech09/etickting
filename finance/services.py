@@ -1,43 +1,89 @@
 import uuid
 from decimal import Decimal
+from decimal import ROUND_HALF_UP
 
 from django.db.models import Sum
 from django.db import transaction
 from django.utils import timezone
 
-from .models import FinancialTransaction, LedgerEntry, Payout
+from .models import CommissionTransaction, FinancialTransaction, LedgerEntry, Payout, PlatformCommissionConfig
+
+
+def current_commission_rate():
+    return PlatformCommissionConfig.current().commission_rate
+
+
+def calculate_commission(gross_ticket_sales_minor, commission_rate):
+    rate = Decimal(commission_rate)
+    if rate < Decimal("0") or rate > Decimal("100"):
+        raise ValueError("Commission rate must be between 0 and 100 percent")
+    return (Decimal(gross_ticket_sales_minor) * rate / Decimal("100")).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
+@transaction.atomic
+def record_commission_for_payment(*, payment, order):
+    if order.commission_rate is None:
+        return None
+    existing = CommissionTransaction.objects.filter(order=order).first()
+    if existing:
+        return existing
+    commission_minor = calculate_commission(order.subtotal_minor, order.commission_rate)
+    return CommissionTransaction.objects.create(
+        order=order,
+        payment=payment,
+        organisation=order.event.organisation,
+        event=order.event,
+        gross_ticket_sales_minor=order.subtotal_minor,
+        commission_rate=order.commission_rate,
+        commission_minor=commission_minor,
+        provider_cost_minor=order.provider_cost_minor,
+        organiser_net_minor=max(Decimal("0.00"), order.subtotal_minor - commission_minor - order.provider_cost_minor),
+    )
 
 
 def organisation_earnings(*, organisation):
-    """Return paid revenue, fees, paid payouts and the remaining payable amount."""
+    """Return legacy and commission-based revenue without rewriting history."""
     from orders.models import Order
 
     sales = Order.objects.filter(
         event__organisation=organisation,
         status__in=[Order.Status.PAID, Order.Status.REFUNDED],
-    ).aggregate(revenue=Sum("total_minor"), fees=Sum("fee_minor"))
+    )
+    legacy_sales = sales.filter(commission_rate__isnull=True).aggregate(revenue=Sum("total_minor"), fees=Sum("fee_minor"))
+    commission_sales = sales.filter(commission_rate__isnull=False).aggregate(
+        revenue=Sum("subtotal_minor"), commission=Sum("commission_minor"), provider_cost=Sum("provider_cost_minor")
+    )
     refunds = Order.objects.filter(
         event__organisation=organisation, status=Order.Status.REFUNDED
     ).aggregate(total=Sum("total_minor"))["total"] or 0
     paid_payouts = Payout.objects.filter(
         organisation=organisation, status=Payout.Status.PAID
     ).aggregate(total=Sum("amount_minor"))["total"] or 0
-    revenue = sales["revenue"] or 0
-    fees = sales["fees"] or 0
-    net_revenue = max(0, revenue - refunds)
+    revenue = (legacy_sales["revenue"] or 0) + (commission_sales["revenue"] or 0)
+    fees = legacy_sales["fees"] or 0
+    commissions = commission_sales["commission"] or 0
+    provider_costs = commission_sales["provider_cost"] or 0
+    net_revenue = max(Decimal("0.00"), revenue - refunds)
+    organiser_net = max(Decimal("0.00"), revenue - refunds - fees - commissions - provider_costs)
     return {
         "revenue_minor": revenue,
         "refunds_minor": refunds,
         "net_revenue_minor": net_revenue,
         "platform_fees_minor": fees,
+        "platform_commission_minor": commissions,
+        "provider_costs_minor": provider_costs,
         "organiser_gross_minor": max(0, net_revenue - fees),
+        "organiser_net_minor": organiser_net,
         "paid_payouts_minor": paid_payouts,
-        "payable_minor": max(0, net_revenue - fees - paid_payouts),
-        "revenue_maloti": Decimal(revenue) / Decimal("100"),
-        "refunds_maloti": Decimal(refunds) / Decimal("100"),
-        "platform_fees_maloti": Decimal(fees) / Decimal("100"),
-        "paid_payouts_maloti": Decimal(paid_payouts) / Decimal("100"),
-        "payable_maloti": Decimal(max(0, net_revenue - fees - paid_payouts)) / Decimal("100"),
+        "payable_minor": max(0, organiser_net - paid_payouts),
+        "revenue_maloti": revenue,
+        "refunds_maloti": refunds,
+        "platform_fees_maloti": fees,
+        "platform_commission_maloti": commissions,
+        "provider_costs_maloti": provider_costs,
+        "organiser_net_maloti": organiser_net,
+        "paid_payouts_maloti": paid_payouts,
+        "payable_maloti": max(Decimal("0.00"), net_revenue - fees - paid_payouts),
     }
 
 

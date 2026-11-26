@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal
 
 from django.conf import settings
 from django.db import models
@@ -38,18 +39,13 @@ class Order(models.Model):
     status = models.CharField(
         max_length=20, choices=Status.choices, default=Status.PENDING
     )
-    subtotal_minor = models.PositiveIntegerField(
-        default=0,
-        help_text="Sum of line item amounts in minor currency units",
-    )
-    fee_minor = models.PositiveIntegerField(
-        default=0,
-        help_text="Platform/service fee in minor currency units",
-    )
-    total_minor = models.PositiveIntegerField(
-        default=0,
-        help_text="Grand total payable in minor currency units",
-    )
+    subtotal_minor = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"), help_text="Sum of ticket line amounts in Maloti")
+    fee_minor = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"), help_text="Legacy customer service fee snapshot in Maloti")
+    commission_rate = models.DecimalField(max_digits=5, decimal_places=2, null=True, blank=True)
+    commission_minor = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    provider_cost_minor = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    organiser_net_minor = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
+    total_minor = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"), help_text="Grand total payable in Maloti")
     currency = models.CharField(max_length=3, default="LSL")
     idempotency_key = models.CharField(
         max_length=128,
@@ -94,18 +90,18 @@ class Order(models.Model):
 
     @property
     def total_maloti(self):
-        """Order total in Maloti (major currency units)."""
-        return self.total_minor / 100
+        """Order total in Maloti."""
+        return self.total_minor
 
     @property
     def subtotal_maloti(self):
         """Order subtotal in Maloti."""
-        return self.subtotal_minor / 100
+        return self.subtotal_minor
 
     @property
     def fee_maloti(self):
         """Platform service fee in Maloti."""
-        return self.fee_minor / 100
+        return self.fee_minor
 
     def mark_paid(self):
         """Mark the order as paid and set the paid timestamp."""
@@ -163,13 +159,9 @@ class OrderLine(models.Model):
 
     quantity = models.PositiveIntegerField(default=1)
 
-    unit_price_minor = models.PositiveIntegerField(
-        help_text="Unit price in minor currency units"
-    )
+    unit_price_minor = models.DecimalField(max_digits=12, decimal_places=2, help_text="Unit price in Maloti")
 
-    line_total_minor = models.PositiveIntegerField(
-        help_text="Line total in minor currency units"
-    )
+    line_total_minor = models.DecimalField(max_digits=12, decimal_places=2, help_text="Line total in Maloti")
 
     class Meta:
         ordering = ["-order__created_at"]
@@ -181,11 +173,11 @@ class OrderLine(models.Model):
 
     @property
     def line_total_maloti(self):
-        """Line total in Maloti (major currency units)."""
-        return self.line_total_minor / 100
+        """Line total in Maloti."""
+        return self.line_total_minor
 
     def save(self, *args, **kwargs):
-        self.line_total_minor = self.unit_price_minor * self.quantity
+        self.line_total_minor = (self.unit_price_minor * self.quantity).quantize(Decimal("0.01"))
         super().save(*args, **kwargs)
 
 

@@ -140,9 +140,7 @@ class TicketCategory(models.Model):
     )
     name = models.CharField(max_length=100)
     description = models.TextField(blank=True)
-    price_minor = models.PositiveIntegerField(
-        help_text="Price in minor currency units (e.g. sente for Maloti)"
-    )
+    price_minor = models.DecimalField(max_digits=12, decimal_places=2, help_text="Price in Maloti")
     total_quantity = models.PositiveIntegerField()
     max_per_customer = models.PositiveIntegerField(default=10)
     sales_opens_at = models.DateTimeField(null=True, blank=True)
@@ -165,7 +163,7 @@ class TicketCategory(models.Model):
 
     @property
     def price_maloti(self):
-        return Decimal(self.price_minor) / Decimal("100")
+        return self.price_minor
 
     @property
     def sold_count(self):
@@ -413,8 +411,13 @@ class ScannerDevice(models.Model):
 
 
 class ScanAttempt(models.Model):
+    class Kind(models.TextChoices):
+        VERIFICATION = "verification", "Verification"
+        ADMISSION = "admission", "Admission"
+
     class Result(models.TextChoices):
         VALID = "valid", "Valid"
+        VERIFIED = "verified", "Verified"
         INVALID = "invalid", "Invalid"
         USED = "used", "Already used"
         UNAUTHORISED = "unauthorised", "Unauthorised"
@@ -423,6 +426,7 @@ class ScanAttempt(models.Model):
     event = models.ForeignKey(Event, on_delete=models.PROTECT, related_name="scan_attempts")
     scanner = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL)
     device = models.ForeignKey(ScannerDevice, null=True, blank=True, on_delete=models.SET_NULL)
+    kind = models.CharField(max_length=20, choices=Kind.choices, default=Kind.ADMISSION)
     result = models.CharField(max_length=20, choices=Result.choices)
     reason = models.CharField(max_length=120, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -432,8 +436,31 @@ class Admission(models.Model):
     ticket = models.OneToOneField(Ticket, on_delete=models.PROTECT, related_name="admission")
     event = models.ForeignKey(Event, on_delete=models.PROTECT, related_name="admissions")
     admitted_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT)
+    device = models.ForeignKey(ScannerDevice, null=True, blank=True, on_delete=models.SET_NULL, related_name="admissions")
+    gate = models.CharField(max_length=100, blank=True)
     admitted_at = models.DateTimeField(auto_now_add=True)
     reentry_count = models.PositiveIntegerField(default=0)
+
+
+class AdmissionReversal(models.Model):
+    """Immutable record of a controlled admission reversal."""
+
+    ticket = models.ForeignKey(Ticket, on_delete=models.PROTECT, related_name="admission_reversals")
+    event = models.ForeignKey(Event, on_delete=models.PROTECT, related_name="admission_reversals")
+    reversed_by = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, on_delete=models.SET_NULL)
+    original_admitted_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="original_admissions_reversed",
+    )
+    original_device_id = models.CharField(max_length=100, blank=True)
+    original_gate = models.CharField(max_length=100, blank=True)
+    original_admitted_at = models.DateTimeField()
+    original_reentry_count = models.PositiveIntegerField(default=0)
+    reason = models.CharField(max_length=500)
+    created_at = models.DateTimeField(auto_now_add=True)
 
 
 class OfflineScanBatch(models.Model):
@@ -495,9 +522,7 @@ class ResaleListing(models.Model):
     )
     seller = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="ticket_listings")
     buyer = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.PROTECT, related_name="ticket_purchases")
-    price_minor = models.PositiveIntegerField(
-        help_text="Price in minor currency units (e.g. sente for Maloti)"
-    )
+    price_minor = models.DecimalField(max_digits=12, decimal_places=2, help_text="Price in Maloti")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.OPEN)
     payment_verified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
@@ -508,4 +533,4 @@ class ResaleListing(models.Model):
 
     @property
     def price_maloti(self):
-        return Decimal(self.price_minor) / Decimal("100")
+        return self.price_minor

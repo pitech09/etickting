@@ -26,6 +26,7 @@ from payments.models import Payment
 
 from .services import (
     calculate_order_total,
+    expire_order_if_holds_expired,
     get_seat_availability_json,
     hold_general_admission,
 )
@@ -152,6 +153,9 @@ def order_detail(request, pk):
         pk=pk,
         customer=request.user,
     )
+    expire_order_if_holds_expired(order)
+    order.refresh_from_db()
+    form = ManualPaymentForm(organisation=order.event.organisation)
     if request.method == "POST":
         if order.status != Order.Status.PENDING:
             messages.error(request, "This order is no longer awaiting payment.")
@@ -169,6 +173,7 @@ def order_detail(request, pk):
                 payment = form.save(commit=False)
                 payment.order = order
                 payment.provider = form.cleaned_data["payment_method"].provider
+                payment.sender_phone = form.cleaned_data["sender_phone"]
                 payment.amount_minor = order.total_minor
                 payment.currency = order.currency
                 payment.status = Payment.Status.PENDING
@@ -181,8 +186,6 @@ def order_detail(request, pk):
                 payment.save()
                 messages.success(request, "Your payment proof was submitted for organiser review.")
                 return redirect("orders:order-detail", pk=order.pk)
-    else:
-        form = ManualPaymentForm(organisation=order.event.organisation)
     pending_over_24h = (
         order.status == Order.Status.PENDING
         and order.created_at <= timezone.now() - timedelta(hours=24)
@@ -196,8 +199,17 @@ def order_detail(request, pk):
             "pending_over_24h": pending_over_24h,
             "support_email": settings.SUPPORT_EMAIL,
             "payment_methods": order.event.organisation.payment_methods.filter(is_active=True),
+            "payment": order.payments.order_by("-created_at").first(),
         },
     )
+
+
+@customer_required
+def payment_status(request, pk):
+    from payments.services import payment_status_for_order
+
+    order = get_object_or_404(Order.objects.select_related("event"), pk=pk, customer=request.user)
+    return JsonResponse(payment_status_for_order(order))
 
 
 @customer_required

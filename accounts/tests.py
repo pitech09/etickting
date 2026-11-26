@@ -15,10 +15,10 @@ class AuthenticationTests(TestCase):
         response = self.client.get(reverse("dashboard"))
         self.assertRedirects(response, f"{reverse('login')}?next={reverse('dashboard')}")
 
-    def test_customer_login_goes_to_customer_dashboard(self):
+    def test_customer_login_goes_to_upcoming_events(self):
         User.objects.create_user(email="customer@example.com", password="pass-12345")
         response = self.client.post(reverse("login"), {"username": "customer@example.com", "password": "pass-12345"})
-        self.assertRedirects(response, reverse("customer-dashboard"))
+        self.assertRedirects(response, reverse("public-event-list"))
 
     def test_organisation_member_login_goes_to_workspace(self):
         user = User.objects.create_user(email="organiser@example.com", password="pass-12345")

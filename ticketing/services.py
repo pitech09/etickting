@@ -3,6 +3,7 @@ import binascii
 import hashlib
 import json
 import secrets
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from cryptography.exceptions import InvalidSignature
 from django.core.exceptions import PermissionDenied, ValidationError
@@ -12,7 +13,7 @@ from django.utils import timezone
 from organisations.models import OrganisationMembership
 
 from .key_management import decrypt_credential, encrypt_credential, signing_keys, verification_keys
-from .models import Admission, ResaleListing, ScanAttempt, ScannerDevice, Ticket, TicketCredential, TicketOwnershipHistory
+from .models import Admission, AdmissionReversal, ResaleListing, ScanAttempt, ScannerDevice, Ticket, TicketCredential, TicketOwnershipHistory
 
 
 def _b64(value):
@@ -95,36 +96,96 @@ def _staff_device(user, event, device_id):
     return ScannerDevice.objects.filter(device_id=device_id, event=event, user=user, active=True).first()
 
 
+def admission_window_status(event, now=None):
+    """Return a backend-authoritative admission block reason, or None if open."""
+    now = now or timezone.now()
+    try:
+        event_zone = ZoneInfo(event.timezone)
+    except ZoneInfoNotFoundError:
+        event_zone = ZoneInfo("Africa/Maseru")
+    local_now = now.astimezone(event_zone)
+    local_start = event.starts_at.astimezone(event_zone)
+    if event.status == event.Status.CANCELLED:
+        return "event_cancelled"
+    if event.status == event.Status.COMPLETED:
+        return "event_ended"
+    if event.status == event.Status.DRAFT:
+        return "event_not_open"
+    if local_now < local_start:
+        return "event_not_started"
+    if event.ends_at and local_now >= event.ends_at.astimezone(event_zone):
+        return "event_ended"
+    return None
+
+
 @transaction.atomic
-def admit_ticket(*, credential, event, user, device_id):
+def admit_ticket(*, credential, event, user, device_id, gate=""):
     device = _staff_device(user, event, device_id)
     if not device:
-        ScanAttempt.objects.create(event=event, scanner=user, result=ScanAttempt.Result.UNAUTHORISED, reason="invalid scanner or event access")
+        ScanAttempt.objects.create(event=event, scanner=user, kind=ScanAttempt.Kind.VERIFICATION, result=ScanAttempt.Result.UNAUTHORISED, reason="invalid scanner or event access")
         return None, "unauthorised"
     ticket, result = verify_credential(credential, expected_event=event)
     if not ticket:
-        ScanAttempt.objects.create(event=event, scanner=user, device=device, result=ScanAttempt.Result.INVALID, reason=result)
+        ScanAttempt.objects.create(event=event, scanner=user, device=device, kind=ScanAttempt.Kind.VERIFICATION, result=ScanAttempt.Result.INVALID, reason=result)
         return None, result
     ticket = Ticket.objects.select_for_update().select_related("owner").get(pk=ticket.pk)
     if result != "valid":
-        ScanAttempt.objects.create(ticket=ticket, event=event, scanner=user, device=device, result=ScanAttempt.Result.INVALID, reason=result)
+        ScanAttempt.objects.create(ticket=ticket, event=event, scanner=user, device=device, kind=ScanAttempt.Kind.VERIFICATION, result=ScanAttempt.Result.INVALID, reason=result)
         return ticket, result
+    window_status = admission_window_status(event)
+    if window_status:
+        ScanAttempt.objects.create(ticket=ticket, event=event, scanner=user, device=device, kind=ScanAttempt.Kind.VERIFICATION, result=ScanAttempt.Result.VERIFIED, reason=window_status)
+        return ticket, "verified_not_started" if window_status == "event_not_started" else window_status
     if hasattr(ticket, "admission"):
         if event.admission_policy == "reentry":
             admission = ticket.admission
             admission.reentry_count += 1
             admission.save(update_fields=["reentry_count"])
-            ScanAttempt.objects.create(ticket=ticket, event=event, scanner=user, device=device, result=ScanAttempt.Result.VALID, reason="reentry")
+            ScanAttempt.objects.create(ticket=ticket, event=event, scanner=user, device=device, kind=ScanAttempt.Kind.ADMISSION, result=ScanAttempt.Result.VALID, reason="reentry")
             return ticket, "reentry"
-        ScanAttempt.objects.create(ticket=ticket, event=event, scanner=user, device=device, result=ScanAttempt.Result.USED, reason="already admitted")
+        ScanAttempt.objects.create(ticket=ticket, event=event, scanner=user, device=device, kind=ScanAttempt.Kind.ADMISSION, result=ScanAttempt.Result.USED, reason="already admitted")
         return ticket, "used"
-    Admission.objects.create(ticket=ticket, event=event, admitted_by=user)
+    Admission.objects.create(ticket=ticket, event=event, admitted_by=user, device=device, gate=gate or "")
     ticket.status = Ticket.Status.ADMITTED
     ticket.save(update_fields=["status", "updated_at"])
-    ScanAttempt.objects.create(ticket=ticket, event=event, scanner=user, device=device, result=ScanAttempt.Result.VALID)
+    ScanAttempt.objects.create(ticket=ticket, event=event, scanner=user, device=device, kind=ScanAttempt.Kind.ADMISSION, result=ScanAttempt.Result.VALID)
     from .realtime import publish_inventory_update
     publish_inventory_update(event.id, [ticket.seat_id] if ticket.seat_id else None)
     return ticket, "valid"
+
+
+@transaction.atomic
+def reverse_admission(*, ticket_id, event, user, reason):
+    """Reverse an accidental admission while retaining an immutable audit record."""
+    allowed_roles = {OrganisationMembership.Role.OWNER, OrganisationMembership.Role.EVENT_MANAGER}
+    if not OrganisationMembership.objects.filter(
+        organisation=event.organisation, user=user, role__in=allowed_roles
+    ).exists():
+        raise PermissionDenied("Only organisation owners and event managers can reverse admissions")
+    reason = (reason or "").strip()
+    if len(reason) < 5:
+        raise ValidationError("A reversal reason of at least five characters is required")
+    ticket = Ticket.objects.select_for_update().get(pk=ticket_id, event=event)
+    admission = Admission.objects.select_for_update().select_related("admitted_by", "device").filter(ticket=ticket).first()
+    if not admission:
+        raise ValidationError("This ticket has no active admission to reverse")
+    reversal = AdmissionReversal.objects.create(
+        ticket=ticket,
+        event=event,
+        reversed_by=user,
+        original_admitted_by=admission.admitted_by,
+        original_device_id=admission.device.device_id if admission.device else "",
+        original_gate=admission.gate,
+        original_admitted_at=admission.admitted_at,
+        original_reentry_count=admission.reentry_count,
+        reason=reason,
+    )
+    admission.delete()
+    ticket.status = Ticket.Status.ISSUED
+    ticket.save(update_fields=["status", "updated_at"])
+    from audit.services import record
+    record(action="admission_reversed", actor=user, obj=ticket, metadata={"reversal_id": str(reversal.pk), "reason": reason})
+    return reversal
 
 
 @transaction.atomic
