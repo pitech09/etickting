@@ -252,7 +252,10 @@ class TicketAuthenticityTests(TestCase):
         self.assertContains(response, "Ticket marketplace")
 
     def test_verification_and_scanner_pages_are_available_to_the_right_users(self):
-        self.assertEqual(self.client.get(reverse("ticketing:ticket-public-verify-page")).status_code, 200)
+        response = self.client.get(reverse("ticketing:ticket-public-verify-page"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Start camera")
+        self.assertContains(response, "html5-qrcode@2.3.8")
         self.client.force_login(self.staff)
         response = self.client.get(reverse("ticketing:ticket-scanner-page", args=[self.event.id]))
         self.assertEqual(response.status_code, 200)
