@@ -1,4 +1,5 @@
 from datetime import timedelta
+from decimal import Decimal
 
 from django.test import TestCase
 from django.urls import reverse
@@ -27,7 +28,7 @@ class CheckoutCorrectnessTests(TestCase):
             status=Event.Status.SALES_OPEN,
         )
         self.category = TicketCategory.objects.create(
-            event=self.event, name="Standard", price_minor=2500, total_quantity=10
+            event=self.event, name="Standard", price_minor="25.00", total_quantity=10
         )
         self.client.force_login(self.customer)
 
@@ -53,10 +54,10 @@ class CheckoutCorrectnessTests(TestCase):
         )
         order = Order.objects.get(customer=self.customer)
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(order.subtotal_minor, 2500)
-        self.assertEqual(order.total_minor, 2500)
-        self.assertEqual(order.fee_minor, 0)
-        self.assertEqual(order.commission_minor, 250)
+        self.assertEqual(order.subtotal_minor, Decimal("25.00"))
+        self.assertEqual(order.total_minor, Decimal("25.00"))
+        self.assertEqual(order.fee_minor, Decimal("0.00"))
+        self.assertEqual(order.commission_minor, Decimal("2.50"))
         detail = self.client.get(response["Location"])
         self.assertNotContains(detail, "Service fee")
         self.assertContains(detail, "M 25.00")
@@ -75,7 +76,7 @@ class CheckoutCorrectnessTests(TestCase):
         self.assertFalse(Order.objects.filter(customer=self.customer).exists())
 
     def test_pending_order_expires_after_its_inventory_hold_ends(self):
-        order = Order.objects.create(customer=self.customer, event=self.event, total_minor=2500)
+        order = Order.objects.create(customer=self.customer, event=self.event, total_minor="25.00")
         InventoryHold.objects.create(
             order=order,
             ticket_category=self.category,
@@ -101,7 +102,7 @@ class SeatFulfillmentTests(TestCase):
             starts_at=timezone.now() + timedelta(days=2),
             status=Event.Status.SALES_OPEN,
         )
-        category = TicketCategory.objects.create(event=event, name="Seat", price_minor=3000, total_quantity=1)
+        category = TicketCategory.objects.create(event=event, name="Seat", price_minor="30.00", total_quantity=1)
         EventSeating.objects.create(event=event, venue=venue)
         section = SeatingSection.objects.create(venue=venue, name="Main")
         row = SeatingRow.objects.create(section=section, name="A")
@@ -112,16 +113,16 @@ class SeatFulfillmentTests(TestCase):
             session_key="expired-session",
             expires_at=timezone.now() - timedelta(minutes=1),
         )
-        order = Order.objects.create(customer=owner, event=event, status=Order.Status.PAID, total_minor=3000)
+        order = Order.objects.create(customer=owner, event=event, status=Order.Status.PAID, total_minor="30.00")
         OrderLine.objects.create(
             order=order,
             line_type=OrderLine.LineType.SEAT,
             ticket_category=category,
             seat=seat,
             seat_reservation=reservation,
-            unit_price_minor=3000,
+            unit_price_minor="30.00",
             quantity=1,
-            line_total_minor=3000,
+            line_total_minor="30.00",
         )
 
         with self.assertRaisesMessage(ValueError, "seat hold has expired"):

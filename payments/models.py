@@ -198,7 +198,7 @@ class PaymentReview(models.Model):
     decision = models.CharField(max_length=20, choices=Decision.choices)
     previous_status = models.CharField(max_length=20)
     resulting_status = models.CharField(max_length=20)
-    received_amount_minor = models.PositiveIntegerField(null=True, blank=True)
+    received_amount_minor = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
     note = models.TextField(blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
 

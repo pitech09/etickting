@@ -1,4 +1,5 @@
 import base64
+from decimal import Decimal
 
 from django.test import TestCase
 from django.core.files.uploadedfile import SimpleUploadedFile
@@ -49,7 +50,7 @@ class PendingPaymentsDashboardTests(TestCase):
         self.order = Order.objects.create(
             customer=self.customer,
             event=self.event,
-            total_minor=2500,
+            total_minor="25.00",
         )
 
     def test_organiser_can_view_pending_orders_for_their_events(self):
@@ -100,7 +101,7 @@ class PendingPaymentsDashboardTests(TestCase):
         self.assertEqual(payment.status, Payment.Status.SUCCESSFUL)
         self.assertEqual(Order.objects.get(pk=self.order.pk).status, Order.Status.PAID)
         self.assertEqual(payment.sender_phone, "+26650123456")
-        self.assertEqual(payment.received_amount_minor, 2500)
+        self.assertEqual(payment.received_amount_minor, Decimal("25.00"))
         self.assertEqual(payment.review_history.count(), 1)
 
     def test_customer_can_check_payment_status(self):
@@ -219,7 +220,7 @@ class PendingPaymentsDashboardTests(TestCase):
     def test_public_event_detail_renders_category_price(self):
         category = self.event.ticket_categories.create(
             name="General admission",
-            price_minor=1250,
+            price_minor="12.50",
             total_quantity=20,
         )
         self.event.status = Event.Status.PUBLISHED
@@ -236,7 +237,7 @@ class PendingPaymentsDashboardTests(TestCase):
         from venues.models import Venue
 
         category = self.event.ticket_categories.create(
-            name="Jazz", price_minor=1500, total_quantity=20
+            name="Jazz", price_minor="15.00", total_quantity=20
         )
         venue = Venue.objects.create(
             organisation=self.event.organisation, name="Maseru Hall", slug="maseru-hall", city="Maseru"

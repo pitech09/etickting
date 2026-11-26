@@ -14,6 +14,7 @@ def current_commission_rate():
 
 
 def calculate_commission(gross_ticket_sales_minor, commission_rate):
+    gross_ticket_sales_minor = Decimal(str(gross_ticket_sales_minor))
     rate = Decimal(commission_rate)
     if rate < Decimal("0") or rate > Decimal("100"):
         raise ValueError("Commission rate must be between 0 and 100 percent")
@@ -27,17 +28,19 @@ def record_commission_for_payment(*, payment, order):
     existing = CommissionTransaction.objects.filter(order=order).first()
     if existing:
         return existing
-    commission_minor = calculate_commission(order.subtotal_minor, order.commission_rate)
+    subtotal = Decimal(str(order.subtotal_minor))
+    provider_cost = Decimal(str(order.provider_cost_minor or "0"))
+    commission_minor = calculate_commission(subtotal, order.commission_rate)
     return CommissionTransaction.objects.create(
         order=order,
         payment=payment,
         organisation=order.event.organisation,
         event=order.event,
-        gross_ticket_sales_minor=order.subtotal_minor,
+        gross_ticket_sales_minor=subtotal,
         commission_rate=order.commission_rate,
         commission_minor=commission_minor,
-        provider_cost_minor=order.provider_cost_minor,
-        organiser_net_minor=max(Decimal("0.00"), order.subtotal_minor - commission_minor - order.provider_cost_minor),
+        provider_cost_minor=provider_cost,
+        organiser_net_minor=max(Decimal("0.00"), subtotal - commission_minor - provider_cost),
     )
 
 
@@ -93,6 +96,7 @@ def create_payout(*, organisation, amount_minor, idempotency_key):
     existing = Payout.objects.filter(idempotency_key=idempotency_key).first()
     if existing:
         return existing
+    amount_minor = Decimal(str(amount_minor))
     if amount_minor <= 0:
         raise ValueError("Payout amount must be positive")
     available = organisation_earnings(organisation=organisation)["payable_minor"]
@@ -125,6 +129,7 @@ def settle_payout(*, payout_id, provider_reference):
 
 @transaction.atomic
 def record_balanced_transaction(*, organisation, reference, description, idempotency_key, debit_account, credit_account, amount_minor):
+    amount_minor = Decimal(str(amount_minor))
     if amount_minor <= 0:
         raise ValueError("Ledger amount must be positive")
     record, created = FinancialTransaction.objects.get_or_create(organisation=organisation, idempotency_key=idempotency_key, defaults={"reference": reference or f"TX-{uuid.uuid4().hex[:12].upper()}", "description": description})

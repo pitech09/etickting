@@ -18,7 +18,12 @@ def listing_list(request):
 @require_POST
 def listing_create(request, ticket_id):
     try:
-        create_resale_listing(ticket_id=ticket_id, seller=request.user, price_minor=int(request.POST.get("price_minor", "0")))
+        from decimal import Decimal, InvalidOperation
+        try:
+            resale_price = Decimal(request.POST.get("price", "0"))
+        except InvalidOperation:
+            resale_price = Decimal("0")
+        create_resale_listing(ticket_id=ticket_id, seller=request.user, price_minor=resale_price)
         messages.success(request, "Your ticket is now listed for resale.")
     except (ValueError, PermissionDenied, ValidationError) as exc:
         messages.error(request, str(exc))

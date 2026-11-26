@@ -177,7 +177,7 @@ class OrderLine(models.Model):
         return self.line_total_minor
 
     def save(self, *args, **kwargs):
-        self.line_total_minor = (self.unit_price_minor * self.quantity).quantize(Decimal("0.01"))
+        self.line_total_minor = (Decimal(str(self.unit_price_minor)) * self.quantity).quantize(Decimal("0.01"))
         super().save(*args, **kwargs)
 
 

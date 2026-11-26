@@ -4,6 +4,20 @@ from decimal import Decimal
 from django.db import migrations, models
 
 
+def to_major_units(apps, schema_editor):
+    model = apps.get_model("seating", "SeatingSection")
+    for row in model.objects.all().iterator():
+        row.price_modifier_minor = row.price_modifier_minor / Decimal("100")
+        row.save(update_fields=["price_modifier_minor"])
+
+
+def to_minor_units(apps, schema_editor):
+    model = apps.get_model("seating", "SeatingSection")
+    for row in model.objects.all().iterator():
+        row.price_modifier_minor = row.price_modifier_minor * Decimal("100")
+        row.save(update_fields=["price_modifier_minor"])
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -16,4 +30,5 @@ class Migration(migrations.Migration):
             name='price_modifier_minor',
             field=models.DecimalField(decimal_places=2, default=Decimal('0.00'), help_text='Additional charge in Maloti for this section', max_digits=12),
         ),
+        migrations.RunPython(to_major_units, to_minor_units),
     ]

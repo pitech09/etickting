@@ -31,7 +31,7 @@
             <td>{{ section.name }}</td>
             <td><span class="badge" style="background-color: {{ section.color }}; color: #fff;">{{ section.color }}</span></td>
             <td>{% if section.is_accessible %}<span class="badge text-bg-success">Yes</span>{% else %}<span class="badge text-bg-secondary">No</span>{% endif %}</td>
-            <td>{{ section.price_modifier_minor }} units</td>
+            <td>M {{ section.price_modifier_maloti|floatformat:2 }}</td>
             <td>{{ section.sort_order }}</td>
             <td class="text-end">
               <a href="{% url 'seating:row-list' section.id %}" class="btn btn-outline-primary btn-sm">Manage rows</a>

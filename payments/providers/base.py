@@ -10,7 +10,7 @@ class PaymentProvider(ABC):
     Concrete providers implement:
     - initiate(order, amount, callback_url) -> dict with provider-specific fields
     - verify(provider_reference, response_data) -> bool
-    - refund(payment, amount_minor) -> dict
+    - refund(payment, amount) -> dict
 
     The provider name is used for registry lookup and must match
     Payment.Provider choices.
@@ -19,7 +19,7 @@ class PaymentProvider(ABC):
     name = None  # Must be set by subclasses
 
     @abstractmethod
-    def initiate(self, order, amount_minor, currency="LSL", callback_url=None):
+    def initiate(self, order, amount, currency="LSL", callback_url=None):
         """Initiate a payment with the provider.
 
         Returns a dict with:
@@ -40,7 +40,7 @@ class PaymentProvider(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def refund(self, payment, amount_minor=None):
+    def refund(self, payment, amount=None):
         """Refund a payment.
 
         Returns a dict with refund details.

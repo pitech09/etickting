@@ -33,19 +33,19 @@ class MPesaLesothoProvider(PaymentProvider):
             self.consumer_key and self.consumer_secret and self.shortcode
         )
 
-    def initiate(self, order, amount_minor, currency="LSL", callback_url=None):
+    def initiate(self, order, amount, currency="LSL", callback_url=None):
         if not self.is_configured():
             logger.warning(
                 "M-Pesa not configured — sandbox simulation for order %s",
                 order.reference,
             )
-            return self._sandbox_initiate(order, amount_minor, callback_url)
+            return self._sandbox_initiate(order, amount, currency, callback_url)
 
         raise NotImplementedError(
             "Production M-Pesa integration not yet implemented."
         )
 
-    def _sandbox_initiate(self, order, amount_minor, callback_url=None):
+    def _sandbox_initiate(self, order, amount, currency="LSL", callback_url=None):
         import uuid
 
         provider_reference = f"MPESA-{uuid.uuid4().hex[:12].upper()}"
@@ -56,7 +56,7 @@ class MPesaLesothoProvider(PaymentProvider):
                 "provider": "mpesa",
                 "environment": "sandbox",
                 "checkout_request_id": provider_reference,
-                "amount": amount_minor,
+                "amount": amount,
                 "currency": currency,
                 "simulated": True,
             },

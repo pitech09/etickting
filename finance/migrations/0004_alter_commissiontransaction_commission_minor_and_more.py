@@ -4,6 +4,32 @@ from decimal import Decimal
 from django.db import migrations, models
 
 
+def to_major_units(apps, schema_editor):
+    for model_name, fields in {
+        "CommissionTransaction": ("gross_ticket_sales_minor", "commission_minor", "provider_cost_minor", "organiser_net_minor"),
+        "LedgerEntry": ("debit_minor", "credit_minor"),
+        "Payout": ("amount_minor",),
+    }.items():
+        model = apps.get_model("finance", model_name)
+        for row in model.objects.all().iterator():
+            for field in fields:
+                setattr(row, field, (getattr(row, field) or Decimal("0")) / Decimal("100"))
+            row.save(update_fields=list(fields))
+
+
+def to_minor_units(apps, schema_editor):
+    for model_name, fields in {
+        "CommissionTransaction": ("gross_ticket_sales_minor", "commission_minor", "provider_cost_minor", "organiser_net_minor"),
+        "LedgerEntry": ("debit_minor", "credit_minor"),
+        "Payout": ("amount_minor",),
+    }.items():
+        model = apps.get_model("finance", model_name)
+        for row in model.objects.all().iterator():
+            for field in fields:
+                setattr(row, field, (getattr(row, field) or Decimal("0")) * Decimal("100"))
+            row.save(update_fields=list(fields))
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -46,4 +72,5 @@ class Migration(migrations.Migration):
             name='amount_minor',
             field=models.DecimalField(decimal_places=2, max_digits=12),
         ),
+        migrations.RunPython(to_major_units, to_minor_units),
     ]

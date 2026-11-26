@@ -2,6 +2,7 @@ import base64
 from io import BytesIO
 import json
 from datetime import timedelta
+from decimal import Decimal
 from unittest import skipUnless
 from unittest.mock import patch
 
@@ -88,7 +89,7 @@ class TicketAuthenticityTests(TestCase):
 
     def test_resale_requires_payment_and_locks_listing(self):
         ticket, old_credential = self.issue()
-        listing = create_resale_listing(ticket_id=ticket.id, seller=self.owner, price_minor=1000)
+        listing = create_resale_listing(ticket_id=ticket.id, seller=self.owner, price_minor=Decimal("10.00"))
         with self.assertRaisesMessage(Exception, "payment must be verified"):
             purchase_resale(listing_id=listing.id, buyer=self.other, payment_verified=False)
         ticket, new_credential = purchase_resale(listing_id=listing.id, buyer=self.other, payment_verified=True)
@@ -338,7 +339,7 @@ class TicketAuthenticityTests(TestCase):
         self.assertTrue(Admission.objects.filter(ticket=ticket).exists())
 
     def test_inventory_dashboard_is_organisation_scoped_and_reports_ga_sales(self):
-        category = TicketCategory.objects.create(event=self.event, name="General", price_minor=2500, total_quantity=10)
+        category = TicketCategory.objects.create(event=self.event, name="General", price_minor="25.00", total_quantity=10)
         Ticket.objects.create(event=self.event, owner=self.owner, reference="GA-SOLD-1", ticket_category=category, payment_verified_at=timezone.now())
         snapshot = inventory_snapshot(self.event)
         self.assertEqual(snapshot["general_admission"][0]["sold"], 1)
@@ -352,7 +353,7 @@ class TicketAuthenticityTests(TestCase):
 
     def test_ticket_category_management_page_renders_category_actions(self):
         category = TicketCategory.objects.create(
-            event=self.event, name="General", price_minor=2500, total_quantity=10
+            event=self.event, name="General", price_minor="25.00", total_quantity=10
         )
         self.client.force_login(self.staff)
         response = self.client.get(
@@ -362,7 +363,7 @@ class TicketAuthenticityTests(TestCase):
         self.assertContains(response, reverse("ticketing:ticket-category-update", args=[category.pk]))
         self.assertContains(response, reverse("ticketing:ticket-category-delete", args=[category.pk]))
 
-    def test_ticket_category_form_accepts_maloti_and_stores_minor_units(self):
+    def test_ticket_category_form_accepts_maloti_values(self):
         self.client.force_login(self.staff)
         response = self.client.post(
             reverse("ticketing:ticket-category-create", args=[self.event.id]),
@@ -378,7 +379,7 @@ class TicketAuthenticityTests(TestCase):
             },
         )
         self.assertEqual(response.status_code, 302)
-        self.assertEqual(TicketCategory.objects.get(name="VIP").price_minor, 15050)
+        self.assertEqual(TicketCategory.objects.get(name="VIP").price_minor, Decimal("150.50"))
 
     def test_event_can_be_unpublished_and_completed_through_lifecycle_actions(self):
         self.client.force_login(self.staff)
@@ -442,7 +443,7 @@ class EventCreationPricingTests(TestCase):
         event = Event.objects.get(name="Summer Showcase")
         category = event.ticket_categories.get()
         self.assertEqual(category.name, "Early bird")
-        self.assertEqual(category.price_minor, 12550)
+        self.assertEqual(category.price_minor, Decimal("125.50"))
         self.assertEqual(category.total_quantity, 100)
         self.assertEqual(category.max_per_customer, 4)
 

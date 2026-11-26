@@ -224,6 +224,9 @@ def current_credential(ticket):
 
 @transaction.atomic
 def create_resale_listing(*, ticket_id, seller, price_minor):
+    from decimal import Decimal
+
+    price_minor = Decimal(str(price_minor))
     ticket = Ticket.objects.select_for_update().get(pk=ticket_id)
     if ticket.owner_id != seller.id or ticket.status != Ticket.Status.ISSUED:
         raise PermissionDenied("Only the current holder of an issued ticket can list it")
