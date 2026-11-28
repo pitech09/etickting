@@ -177,6 +177,9 @@ TICKETING_VERIFY_KEYS = os.getenv("TICKETING_VERIFY_KEYS", "")
 TICKETING_PUBLIC_VERIFY_RATE_LIMIT = int(os.getenv("TICKETING_PUBLIC_VERIFY_RATE_LIMIT", "30"))
 TICKETING_SCAN_RATE_LIMIT = int(os.getenv("TICKETING_SCAN_RATE_LIMIT", "120"))
 TICKETING_HOLD_MINUTES = int(os.getenv("TICKETING_HOLD_MINUTES", "10"))
+# Reserved-seat selections remain held for one day while the customer completes
+# payment and organiser verification. Deployments can override this explicitly.
+SEATING_RESERVATION_MINUTES = int(os.getenv("SEATING_RESERVATION_MINUTES", "1440"))
 TICKETING_CREDENTIAL_ENCRYPTION_KEY = os.getenv("TICKETING_CREDENTIAL_ENCRYPTION_KEY", "")
 BLOCKCHAIN_RPC_URL = os.getenv("BLOCKCHAIN_RPC_URL", "")
 BLOCKCHAIN_CONTRACT_ADDRESS = os.getenv("BLOCKCHAIN_CONTRACT_ADDRESS", "")

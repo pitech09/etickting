@@ -195,7 +195,7 @@ class EventSeating(models.Model):
 class SeatReservation(models.Model):
     """Temporary reservation of a seat during checkout.
 
-    Reservations expire after a configurable period (default 10 minutes)
+    Reservations expire after a configurable period (default 24 hours)
     and are automatically released. Only one active reservation per seat
     is enforced at the database level.
     """

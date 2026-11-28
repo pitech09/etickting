@@ -1,6 +1,7 @@
 from datetime import timedelta
 from decimal import Decimal, InvalidOperation
 
+from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
@@ -84,9 +85,7 @@ def get_customer_seat_map_data(event):
 
 
 def default_reservation_expiry():
-    from django.conf import settings
-
-    minutes = getattr(settings, "SEATING_RESERVATION_MINUTES", 10)
+    minutes = getattr(settings, "SEATING_RESERVATION_MINUTES", 1440)
     return timezone.now() + timedelta(minutes=minutes)
 
 
@@ -100,7 +99,8 @@ def reserve_seats(*, event, seat_ids, session_key, reservation_minutes=None):
     SeatReservation objects and errors is a list of error messages.
     """
     if reservation_minutes is None:
-        reservation_minutes = 10
+        reservation_minutes = getattr(settings, "SEATING_RESERVATION_MINUTES", 1440)
+    seat_ids = [str(seat_id) for seat_id in seat_ids]
 
     expires_at = timezone.now() + timedelta(minutes=reservation_minutes)
 

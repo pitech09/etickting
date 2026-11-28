@@ -62,6 +62,11 @@ class TicketAuthenticityTests(TestCase):
         with override_settings(DEBUG=False, TICKETING_SIGNING_KEYS=""):
             self.assertEqual(signing_keys(), {})
 
+    def test_development_accepts_legacy_single_base64_signing_key(self):
+        raw_key = encoded_key(self.private)
+        with override_settings(DEBUG=True, TICKETING_SIGNING_KEYS=raw_key):
+            self.assertIn("legacy", signing_keys())
+
     def test_forged_and_modified_credentials_fail(self):
         _, credential = self.issue()
         self.assertEqual(verify_credential(credential)[1], "valid")

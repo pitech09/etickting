@@ -449,7 +449,12 @@ def review_payment(request, payment_id):
     )
     form = PaymentReviewForm(request.POST)
     if not form.is_valid():
-        messages.error(request, "Choose whether to approve or reject this payment.")
+        errors = "; ".join(
+            error
+            for field_errors in form.errors.values()
+            for error in field_errors
+        )
+        messages.error(request, f"Payment review could not be saved: {errors}")
         return redirect("pending-payments")
     note = form.cleaned_data["review_note"].strip()
     decision = form.cleaned_data["decision"]

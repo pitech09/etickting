@@ -1,0 +1,3 @@
+{% load static %}
+{% get_media_prefix as MEDIA_PREFIX %}
+<img class="{{ logo_class|default:'brand-logo' }}" src="{{ MEDIA_PREFIX }}kena%20logo.png" alt="{{ logo_alt|default:'Kena' }}" width="96" height="96" decoding="async">

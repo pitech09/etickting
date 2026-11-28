@@ -231,6 +231,7 @@ def order_detail(request, pk):
                 organisation=order.event.organisation,
             )
             if form.is_valid():
+                previous_proof = payment.proof_image.name if payment and payment.proof_image else ""
                 payment = form.save(commit=False)
                 payment.order = order
                 payment.provider = form.cleaned_data["payment_method"].provider
@@ -244,8 +245,20 @@ def order_detail(request, pk):
                     or uuid.uuid4().hex
                 )
                 payment.submitted_at = timezone.now()
-                payment.save()
-                messages.success(request, "Your payment proof was submitted for organiser review.")
+                try:
+                    payment.save()
+                except Exception:
+                    # Proof images are optional. A temporary object-storage outage must
+                    # not prevent the payment reference itself from reaching the organiser.
+                    logger.exception("Payment proof storage failed for order %s", order.reference)
+                    payment.proof_image = previous_proof or None
+                    payment.save()
+                    messages.warning(
+                        request,
+                        "Payment submitted for organiser review, but the optional proof image could not be stored.",
+                    )
+                else:
+                    messages.success(request, "Your payment proof was submitted for organiser review.")
                 return redirect("orders:order-detail", pk=order.pk)
     pending_over_24h = (
         order.status == Order.Status.PENDING

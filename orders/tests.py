@@ -18,6 +18,7 @@ from .models import InventoryHold, Order, OrderLine
 from .services import expire_order_if_holds_expired
 from finance.models import PlatformCommissionConfig
 from payments.models import Payment
+from seating.services import reserve_seats
 
 
 class CheckoutCorrectnessTests(TestCase):
@@ -172,9 +173,24 @@ class SeatFulfillmentTests(TestCase):
         self.assertEqual(order.lines.filter(line_type=OrderLine.LineType.SEAT).count(), 2)
         self.assertEqual(order.subtotal_minor, Decimal("60.00"))
         self.assertEqual(SeatReservation.objects.filter(event=self.event, status=SeatReservation.Status.ACTIVE).count(), 2)
+
         self.section.ticket_price_minor = "99.00"
         self.section.save(update_fields=["ticket_price_minor"])
         self.assertEqual(list(order.lines.values_list("unit_price_minor", flat=True)), [Decimal("30.00"), Decimal("30.00")])
+
+    def test_reserved_seat_hold_defaults_to_24_hours(self):
+        before = timezone.now()
+        reservations, errors = reserve_seats(
+            event=self.event,
+            seat_ids=[self.seats[0].pk],
+            session_key="24-hour-seat-hold",
+        )
+
+        self.assertFalse(errors)
+        self.assertEqual(len(reservations), 1)
+        duration = reservations[0].expires_at - before
+        self.assertGreaterEqual(duration.total_seconds(), (24 * 60 - 1) * 60)
+        self.assertLessEqual(duration.total_seconds(), (24 * 60 + 1) * 60)
 
     def test_reserved_checkout_applies_section_supplement_per_seat(self):
         self.section.price_modifier_minor = "5.50"
