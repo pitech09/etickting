@@ -1,4 +1,5 @@
 {% load static %}
+{% get_media_prefix as MEDIA_PREFIX %}
 <!doctype html>
 <html lang="en-LS">
 <head>
@@ -7,16 +8,19 @@
   <meta name="color-scheme" content="light">
   <title>{% block title %}Kena{% endblock %}</title>
   <meta name="theme-color" content="#111a33">
+  <link rel="manifest" href="{% static 'manifest.webmanifest' %}">
+  <link rel="apple-touch-icon" href="{% static 'icons/kena-192.png' %}">
   <link rel="preconnect" href="https://cdn.jsdelivr.net">
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <link rel="stylesheet" href="{% static 'css/app.css' %}">
+  {% block extra_css %}{% endblock %}
   <script src="{% static 'js/app.js' %}" defer></script>
 </head>
 <body>
 <a class="visually-hidden-focusable" href="#main-content">Skip to content</a>
 <nav class="site-nav navbar navbar-expand-lg navbar-dark" aria-label="Primary navigation">
   <div class="container nav-inner">
-    <a class="navbar-brand fw-semibold text-white text-decoration-none" href="{% url 'home' %}"><span class="brand-mark">K</span><span>Kena</span></a>
+    <a class="navbar-brand fw-semibold text-white text-decoration-none" href="{% url 'home' %}"><img class="brand-logo" src="{{ MEDIA_PREFIX }}kena%20logo.png" alt="Kena"><span class="visually-hidden">Kena</span></a>
     <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#primary-navigation" aria-controls="primary-navigation" aria-expanded="false" aria-label="Open navigation"><span class="navbar-toggler-icon"></span></button>
     <div class="collapse navbar-collapse" id="primary-navigation">
       <div class="nav-links ms-lg-4">
@@ -42,13 +46,16 @@
           <form method="post" action="{% url 'logout' %}" class="d-inline">{% csrf_token %}<button class="btn btn-nav-secondary btn-sm" type="submit">Log out</button></form>
         {% else %}
           <a href="{% url 'login' %}">Sign in</a>
+          <button id="install-app" class="btn btn-nav-secondary btn-sm d-none" type="button">Install app</button>
           <a class="btn btn-nav-primary btn-sm" href="{% url 'register' %}">Create account</a>
         {% endif %}
       </div>
     </div>
   </div>
 </nav>
+<div id="route-loading" class="route-loading" role="progressbar" aria-label="Loading page" aria-hidden="true"><span></span></div>
 <div id="network-status" class="network-status alert alert-warning d-none" role="status" aria-live="assertive" aria-hidden="true"><div class="container d-flex align-items-center justify-content-between gap-3"><span id="network-status-text">You are offline.</span><button id="network-retry" class="btn btn-sm btn-outline-dark" type="button">Retry</button></div></div>
+<div id="app-feedback" class="app-feedback" aria-live="polite" aria-atomic="true"></div>
 <main id="main-content" class="container py-4">{% if messages %}{% for message in messages %}<div class="alert alert-{{ message.tags|default:'info' }}" role="status">{{ message }}</div>{% endfor %}{% endif %}{% block content %}{% endblock %}</main>
 <footer class="site-footer"><div class="container d-flex justify-content-between gap-3 flex-wrap"><span>Kena · trusted event access</span><span><a href="{% url 'customer-terms' %}">Customer terms</a> · <a href="{% url 'organiser-terms' %}">Organiser terms</a> · <a href="{% url 'contact' %}">Support</a></span></div></footer>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>

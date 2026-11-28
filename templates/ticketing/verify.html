@@ -23,6 +23,7 @@ const startCameraButton = document.getElementById('start-camera');
 const stopCameraButton = document.getElementById('stop-camera');
 let cameraScanner = null;
 let cameraRunning = false;
+let verifying = false;
 const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[char]));
 const stopCamera = async () => {
   if (!cameraScanner || !cameraRunning) return;
@@ -47,7 +48,7 @@ const startCamera = async () => {
 startCameraButton.addEventListener('click', startCamera);
 stopCameraButton.addEventListener('click', stopCamera);
 verifyForm.addEventListener('submit', async (event) => {
-  event.preventDefault(); await stopCamera();
+  event.preventDefault(); if (verifying) return; verifying = true; await stopCamera();
   const button = verifyForm.querySelector('button[type="submit"]'); const spinner = button.querySelector('.spinner-border');
   button.disabled = true; spinner.classList.remove('d-none'); resultBox.innerHTML = '';
   try {
@@ -60,7 +61,7 @@ verifyForm.addEventListener('submit', async (event) => {
     const valid = data.authentic === true;
     resultBox.innerHTML = `<div class="alert ${valid ? 'alert-success' : 'alert-danger'}"><h2 class="h5">${valid ? 'Authentic ticket' : 'Ticket not valid'}</h2><p class="mb-1">Status: <strong>${escapeHtml(data.status || 'unknown')}</strong></p>${valid ? `<p class="mb-0">Event: ${escapeHtml(data.event)}<br>Reference: <span class="font-monospace">${escapeHtml(data.ticket_reference)}</span>${data.seat ? `<br>Seat: ${escapeHtml(data.seat)}` : ''}</p>` : '<p class="mb-0">Do not use this ticket for entry. Ask the issuer for help.</p>'}</div>`;
   } catch (error) { resultBox.innerHTML = `<div class="alert alert-warning">${escapeHtml(error.message || 'We could not reach the verification service. Please try again.')}</div>`; }
-  button.disabled = false; spinner.classList.add('d-none');
+  button.disabled = false; spinner.classList.add('d-none'); verifying = false;
 });
 </script>
 {% endblock %}

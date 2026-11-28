@@ -26,6 +26,14 @@ class SeatingSection(models.Model):
         max_digits=12, decimal_places=2, default=Decimal("0.00"),
         help_text="Additional charge in Maloti for this section",
     )
+    ticket_price_minor = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        default=None,
+        help_text="Optional section ticket price in Maloti. Blank uses the event ticket category price.",
+    )
     is_accessible = models.BooleanField(
         default=False, help_text="Wheelchair-accessible section"
     )
@@ -48,6 +56,16 @@ class SeatingSection(models.Model):
     @property
     def price_modifier_maloti(self):
         return self.price_modifier_minor
+
+    @property
+    def seat_count(self):
+        return getattr(self, "annotated_seat_count", None) or Seat.objects.filter(row__section=self).count()
+
+    @property
+    def potential_revenue_minor(self):
+        if self.ticket_price_minor is None:
+            return None
+        return (self.ticket_price_minor + self.price_modifier_minor) * self.seat_count
 
 
 class SeatingRow(models.Model):

@@ -76,6 +76,18 @@
   cursor: not-allowed;
 }
 
+.seat-sold {
+  background-color: #0d6efd;
+  color: #fff;
+  cursor: not-allowed;
+}
+
+.seat-reserved {
+  background-color: #ffc107;
+  color: #172033;
+  cursor: not-allowed;
+}
+
 .seat-unavailable {
   background-color: #adb5bd;
   color: #fff;
@@ -113,6 +125,18 @@
 
 .legend {
   gap: 1rem;
+}
+
+.seat-map-legend { display: flex; flex-wrap: wrap; gap: 1rem; color: #495057; font-size: .875rem; }
+.seat-dot { display: inline-block; width: .8rem; height: .8rem; border-radius: 50%; margin-right: .25rem; vertical-align: -1px; }
+.seat-dot.available { background: #198754; }
+.seat-dot.selected { background: #0d6efd; }
+.seat-dot.unavailable { background: #adb5bd; }
+
+@media (max-width: 575.98px) {
+  .seat-map { overflow-x: auto; padding-bottom: .5rem; }
+  .seat-row { justify-content: flex-start; min-width: max-content; }
+  .seat { flex: 0 0 2rem; width: 2rem; height: 2rem; }
 }
 
 .sticky-top {

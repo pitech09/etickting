@@ -1,9 +1,86 @@
 from datetime import timedelta
+from decimal import Decimal, InvalidOperation
 
 from django.db import transaction
 from django.utils import timezone
 
-from .models import Seat, SeatAllocation, SeatReservation
+from .models import EventSeating, Seat, SeatAllocation, SeatReservation
+
+
+def calculate_seat_price(*, category, seat):
+    """Calculate a reserved seat's configured price in Maloti."""
+    try:
+        configured_section_price = seat.row.section.ticket_price_minor
+        base_price = Decimal(str(
+            configured_section_price if configured_section_price is not None else category.price_minor
+        ))
+        supplement = Decimal(str(seat.row.section.price_modifier_minor or "0.00"))
+    except (InvalidOperation, TypeError, ValueError) as exc:
+        raise ValueError("This ticket has an invalid price configuration.") from exc
+    if base_price < 0 or supplement < 0:
+        raise ValueError("This ticket has an invalid price configuration.")
+    return (base_price + supplement).quantize(Decimal("0.01"))
+
+
+def get_customer_seat_map_data(event):
+    """Return the server-authoritative seat state used by customer checkout."""
+    try:
+        event_seating = event.event_seating
+    except EventSeating.DoesNotExist:
+        return []
+
+    from .models import SeatingSection
+
+    sections = (
+        SeatingSection.objects.filter(venue=event_seating.venue)
+        .prefetch_related("rows__seats")
+        .order_by("sort_order", "name")
+    )
+    seats = [seat for section in sections for row in section.rows.all() for seat in row.seats.all()]
+    seat_ids = [seat.id for seat in seats]
+    allocated_seat_ids = set(
+        SeatAllocation.objects.filter(seat_id__in=seat_ids).values_list("seat_id", flat=True)
+    )
+    active_reservations = {
+        reservation.seat_id: reservation
+        for reservation in SeatReservation.objects.filter(
+            event=event,
+            seat_id__in=seat_ids,
+            status=SeatReservation.Status.ACTIVE,
+            expires_at__gt=timezone.now(),
+        ).order_by("seat_id", "-expires_at")
+    }
+    seat_data = []
+    for section in sections:
+        for row in section.rows.all():
+            for seat in row.seats.all():
+                seat_info = {
+                    "id": str(seat.id),
+                    "label": seat.label,
+                    "section": section.name,
+                    "row": row.name,
+                    "number": seat.number,
+                    "status": seat.status,
+                    "is_available": seat.status == Seat.Status.AVAILABLE,
+                    "is_accessible": seat.is_accessible,
+                    "is_restricted_view": seat.is_restricted_view,
+                    "section_ticket_price_minor": (
+                        str(section.ticket_price_minor)
+                        if section.ticket_price_minor is not None else None
+                    ),
+                    "section_price_modifier_minor": str(section.price_modifier_minor),
+                }
+                if seat.id in allocated_seat_ids:
+                    seat_info.update(status="sold", is_available=False)
+                active_reservation = active_reservations.get(seat.id)
+                if active_reservation:
+                    seat_info.update(
+                        status="reserved",
+                        is_available=False,
+                        reservation_expires_at=active_reservation.expires_at.isoformat(),
+                    )
+                seat_data.append(seat_info)
+    return seat_data
 
 
 def default_reservation_expiry():
@@ -36,7 +113,7 @@ def reserve_seats(*, event, seat_ids, session_key, reservation_minutes=None):
         seats = Seat.objects.select_for_update().filter(
             id__in=seat_ids,
             row__section__venue__event_seatings__event=event,
-        ).distinct()
+        )
 
         found_seat_ids = {str(seat.id) for seat in seats}
         for seat_id in seat_ids:

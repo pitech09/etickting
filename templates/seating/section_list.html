@@ -20,7 +20,9 @@
             <th>Name</th>
             <th>Color</th>
             <th>Accessible</th>
-            <th>Price modifier</th>
+            <th>Seats</th>
+            <th>Ticket price</th>
+            <th>Potential revenue</th>
             <th>Sort order</th>
             <th class="text-end">Actions</th>
           </tr>
@@ -31,9 +33,12 @@
             <td>{{ section.name }}</td>
             <td><span class="badge" style="background-color: {{ section.color }}; color: #fff;">{{ section.color }}</span></td>
             <td>{% if section.is_accessible %}<span class="badge text-bg-success">Yes</span>{% else %}<span class="badge text-bg-secondary">No</span>{% endif %}</td>
-            <td>M {{ section.price_modifier_maloti|floatformat:2 }}</td>
+            <td>{{ section.seat_count }}</td>
+            <td>{% if section.ticket_price_minor is not None %}M {{ section.ticket_price_minor|floatformat:2 }}{% else %}Uses category price{% endif %}</td>
+            <td>{% if section.potential_revenue_minor is not None %}M {{ section.potential_revenue_minor|floatformat:2 }}{% else %}—{% endif %}</td>
             <td>{{ section.sort_order }}</td>
             <td class="text-end">
+              <a href="{% url 'seating:section-update' section.id %}" class="btn btn-outline-secondary btn-sm">Edit pricing</a>
               <a href="{% url 'seating:row-list' section.id %}" class="btn btn-outline-primary btn-sm">Manage rows</a>
             </td>
           </tr>

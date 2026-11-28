@@ -1,4 +1,6 @@
 import uuid
+import logging
+from decimal import Decimal, InvalidOperation
 from datetime import timedelta
 
 from django.conf import settings
@@ -20,10 +22,12 @@ from orders.forms import OrderCreateForm
 from orders.models import Order, OrderLine
 from ticketing.models import Event, TicketCategory, Ticket
 from seating.models import Seat
-from seating.services import reserve_seats
+from seating.services import calculate_seat_price, get_customer_seat_map_data, reserve_seats
 from dashboard.views import customer_required
 from payments.forms import ManualPaymentForm
 from payments.models import Payment, RefundRequest
+
+logger = logging.getLogger(__name__)
 
 from .services import (
     calculate_order_total,
@@ -62,6 +66,14 @@ def order_create(request, event_id):
                         ).first()
                         if not category:
                             raise ValueError("That ticket category is no longer available.")
+                        try:
+                            category_price = Decimal(str(category.price_minor))
+                        except (InvalidOperation, TypeError, ValueError) as exc:
+                            logger.warning("Invalid price for ticket category %s on event %s", category.pk, event.pk, exc_info=exc)
+                            raise ValueError("Pricing is currently unavailable for this ticket category.") from exc
+                        if category_price < 0:
+                            logger.warning("Negative price for ticket category %s on event %s", category.pk, event.pk)
+                            raise ValueError("Pricing is currently unavailable for this ticket category.")
                         now = timezone.now()
                         if category.sales_opens_at and now < category.sales_opens_at:
                             raise ValueError("This ticket category is not on sale yet.")
@@ -77,24 +89,33 @@ def order_create(request, event_id):
                         )
                         request.session.save()
                         if event.ticketing_model == Event.TicketingModel.RESERVED_SEATING:
+                            seat_ids = form.cleaned_data.get("seat_ids", [])
+                            if len(seat_ids) != quantity:
+                                raise ValueError(f"Choose exactly {quantity} seat(s) on the seating map.")
                             reservations, errors = reserve_seats(
                                 event=event,
-                                seat_ids=[form.cleaned_data["seat"]],
+                                seat_ids=seat_ids,
                                 session_key=request.session.session_key,
                             )
-                            if errors or not reservations:
+                            if errors or len(reservations) != quantity:
                                 raise ValueError(errors[0] if errors else "That seat is no longer available.")
-                            seat = Seat.objects.get(pk=form.cleaned_data["seat"])
-                            OrderLine.objects.create(
-                                order=order,
-                                line_type=OrderLine.LineType.SEAT,
-                                ticket_category=category,
-                                seat=seat,
-                                seat_reservation=reservations[0],
-                                unit_price_minor=category.price_minor,
-                                quantity=1,
-                                line_total_minor=category.price_minor,
-                            )
+                            reservations_by_seat = {str(reservation.seat_id): reservation for reservation in reservations}
+                            seats = Seat.objects.select_related("row__section").filter(pk__in=seat_ids)
+                            seats_by_id = {str(seat.id): seat for seat in seats}
+                            for seat_id in seat_ids:
+                                seat = seats_by_id[seat_id]
+                                reservation = reservations_by_seat[seat_id]
+                                unit_price = calculate_seat_price(category=category, seat=seat)
+                                OrderLine.objects.create(
+                                    order=order,
+                                    line_type=OrderLine.LineType.SEAT,
+                                    ticket_category=category,
+                                    seat=seat,
+                                    seat_reservation=reservation,
+                                    unit_price_minor=unit_price,
+                                    quantity=1,
+                                    line_total_minor=unit_price,
+                                )
                         else:
                             hold_general_admission(
                                 order=order,
@@ -128,17 +149,41 @@ def order_create(request, event_id):
         form = OrderCreateForm(
             event=event,
             user=request.user,
-            initial={"seat": request.GET.get("seat")} if request.GET.get("seat") else None,
+            initial={
+                "ticket_category": request.GET.get("ticket_category", ""),
+                "quantity": request.GET.get("quantity", "1"),
+                "seat_ids": request.GET.get("seat_ids", ""),
+            },
         )
 
+    selected_seat_ids = [value.strip() for value in (request.POST.get("seat_ids") or request.GET.get("seat_ids") or "").split(",") if value.strip()]
+    selected_seats = Seat.objects.filter(pk__in=selected_seat_ids).select_related("row__section") if selected_seat_ids else []
+    ticket_categories = list(
+        event.ticket_categories.filter(is_active=True).values(
+            "id", "name", "price_minor", "max_per_customer"
+        )
+    )
+    pricing_unavailable = not ticket_categories or any(
+        category["price_minor"] is None or category["price_minor"] < 0
+        for category in ticket_categories
+    )
+    if pricing_unavailable:
+        logger.warning("Pricing unavailable for event %s during checkout", event.pk)
     return render(request, "orders/order_create.html", {
         "form": form,
         "event": event,
+        "selected_seats": selected_seats,
+        "reserved_seat_modifiers": [str(seat.row.section.price_modifier_minor) for seat in selected_seats],
         "idempotency_key": request.POST.get("idempotency_key", "") or uuid.uuid4().hex,
         "ticket_price_data": {
             str(category.id): str(category.price_minor)
             for category in TicketCategory.objects.filter(event=event, is_active=True)
         },
+        "ticket_categories": ticket_categories,
+        "pricing_unavailable": pricing_unavailable,
+        "seat_data": get_customer_seat_map_data(event)
+        if event.ticketing_model == Event.TicketingModel.RESERVED_SEATING
+        else [],
     })
 
 

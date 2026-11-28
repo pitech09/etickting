@@ -1,0 +1,15 @@
+accounts
+attendees
+audit
+blockchain
+config
+core
+dashboard
+finance
+notifications
+orders
+organisations
+payments
+seating
+ticketing
+venues

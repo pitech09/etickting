@@ -5,7 +5,7 @@ from .models import EventSeating, SeatingRow, SeatingSection, Seat, SeatAllocati
 
 @admin.register(SeatingSection)
 class SeatingSectionAdmin(admin.ModelAdmin):
-    list_display = ("name", "venue", "color", "is_accessible", "sort_order")
+    list_display = ("name", "venue", "ticket_price_minor", "price_modifier_minor", "is_accessible", "sort_order")
     list_filter = ("venue", "is_accessible")
     search_fields = ("name", "venue__name")
     ordering = ("venue", "sort_order", "name")

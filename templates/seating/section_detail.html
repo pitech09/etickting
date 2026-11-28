@@ -6,6 +6,7 @@
   </div>
   <div class="d-flex gap-2">
     <a href="{% url 'seating:section-list' venue.id %}" class="btn btn-outline-secondary">Back to sections</a>
+    <a href="{% url 'seating:section-update' section.id %}" class="btn btn-outline-primary">Edit pricing</a>
     <a href="{% url 'seating:row-create' section.id %}" class="btn btn-primary">Add row</a>
   </div>
 </div>
@@ -24,8 +25,14 @@
           <dd class="col-sm-8"><span class="badge" style="background-color: {{ section.color }}; color: #fff;">{{ section.color }}</span></dd>
           <dt class="col-sm-4">Accessible</dt>
           <dd class="col-sm-8">{% if section.is_accessible %}Yes{% else %}No{% endif %}</dd>
-          <dt class="col-sm-4">Price modifier</dt>
+          <dt class="col-sm-4">Seats</dt>
+          <dd class="col-sm-8">{{ section.seat_count }}</dd>
+          <dt class="col-sm-4">Section ticket price</dt>
+          <dd class="col-sm-8">{% if section.ticket_price_minor is not None %}M {{ section.ticket_price_minor|floatformat:2 }}{% else %}Uses event category price{% endif %}</dd>
+          <dt class="col-sm-4">Supplement</dt>
           <dd class="col-sm-8">M {{ section.price_modifier_maloti|floatformat:2 }}</dd>
+          <dt class="col-sm-4">Potential revenue</dt>
+          <dd class="col-sm-8">{% if section.potential_revenue_minor is not None %}M {{ section.potential_revenue_minor|floatformat:2 }}{% else %}Set a section price to calculate{% endif %}</dd>
           <dt class="col-sm-4">Sort order</dt>
           <dd class="col-sm-8">{{ section.sort_order }}</dd>
           {% if section.description %}

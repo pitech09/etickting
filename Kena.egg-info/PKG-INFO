@@ -1,0 +1,29 @@
+Metadata-Version: 2.4
+Name: Kena
+Version: 0.1.0
+Summary: Secure event ticketing platform for Lesotho and the region
+Requires-Python: >=3.12
+Requires-Dist: Django<5.3,>=5.2
+Requires-Dist: djangorestframework<4,>=3.15
+Requires-Dist: channels<5,>=4.2
+Requires-Dist: channels-redis<5,>=4.2
+Requires-Dist: celery<6,>=5.4
+Requires-Dist: psycopg[binary]<4,>=3.2
+Requires-Dist: dj-database-url<3,>=2.3
+Requires-Dist: python-dotenv<2,>=1.0
+Requires-Dist: uvicorn[standard]<1,>=0.32
+Requires-Dist: whitenoise<7,>=6.8
+Requires-Dist: cryptography<47,>=43
+Requires-Dist: qrcode[pil]<9,>=8
+Requires-Dist: Pillow<13,>=10
+Requires-Dist: django-storages[s3]<2,>=1.14
+Requires-Dist: cloudinary
+Requires-Dist: django-cloudinary-storage
+Provides-Extra: dev
+Requires-Dist: pytest>=8.3; extra == "dev"
+Requires-Dist: pytest-django>=4.9; extra == "dev"
+Requires-Dist: ruff>=0.8; extra == "dev"
+Provides-Extra: blockchain
+Requires-Dist: web3<8,>=7; extra == "blockchain"
+Provides-Extra: ops
+Requires-Dist: locust<3,>=2.32; extra == "ops"

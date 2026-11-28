@@ -2,6 +2,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.db import transaction
+from django.db.models import Count
 from django.http import JsonResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
@@ -12,10 +13,10 @@ from django.views.generic import CreateView, DetailView, ListView, UpdateView
 from organisations.models import OrganisationMembership
 from dashboard.views import customer_required
 
-from .models import EventSeating, SeatingRow, SeatingSection, Seat, SeatReservation
+from .models import EventSeating, Seat, SeatingRow, SeatingSection
+from .forms import SeatingSectionForm
 from .services import (
     convert_reservation_to_allocation,
-    get_event_seat_availability,
     reserve_seats,
 )
 
@@ -43,21 +44,46 @@ class _RequiresOrganisationEventAccess(LoginRequiredMixin):
         return super().dispatch(request, *args, **kwargs)
 
 
-class SeatingSectionListView(_RequiresOrganisationEventAccess, ListView):
+class _RequiresOrganisationVenueAccess(LoginRequiredMixin):
+    def dispatch(self, request, *args, **kwargs):
+        from venues.models import Venue
+
+        venue_id = kwargs.get("venue_id")
+        if not venue_id and kwargs.get("pk"):
+            venue_id = SeatingSection.objects.filter(pk=kwargs["pk"]).values_list("venue_id", flat=True).first()
+        organisation_id = Venue.objects.filter(pk=venue_id).values_list("organisation_id", flat=True).first()
+        if not organisation_id or not OrganisationMembership.objects.filter(
+            organisation_id=organisation_id, user=request.user
+        ).exists():
+            raise PermissionDenied("You do not belong to this organisation.")
+        return super().dispatch(request, *args, **kwargs)
+
+
+class SeatingSectionListView(_RequiresOrganisationVenueAccess, ListView):
     model = SeatingSection
     template_name = "seating/section_list.html"
     context_object_name = "sections"
 
     def get_queryset(self):
         venue_id = self.kwargs.get("venue_id")
-        return SeatingSection.objects.filter(venue_id=venue_id).order_by(
+        return SeatingSection.objects.filter(venue_id=venue_id).annotate(
+            annotated_seat_count=Count("rows__seats")
+        ).order_by(
             "sort_order", "name"
         )
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["venue"] = get_object_or_404(
+            __import__("venues.models", fromlist=["Venue"]).Venue,
+            pk=self.kwargs["venue_id"],
+        )
+        return context
 
-class SeatingSectionCreateView(_RequiresOrganisationEventAccess, CreateView):
+
+class SeatingSectionCreateView(_RequiresOrganisationVenueAccess, CreateView):
     model = SeatingSection
-    fields = ("name", "description", "color", "price_modifier_minor", "is_accessible", "sort_order")
+    form_class = SeatingSectionForm
     template_name = "seating/section_form.html"
 
     def get_context_data(self, **kwargs):
@@ -70,12 +96,54 @@ class SeatingSectionCreateView(_RequiresOrganisationEventAccess, CreateView):
 
     def form_valid(self, form):
         form.instance.venue_id = self.kwargs.get("venue_id")
-        return super().form_valid(form)
+        response = super().form_valid(form)
+        from audit.services import record
+        record(
+            action="seating_section_created",
+            actor=self.request.user,
+            obj=self.object,
+            metadata={"ticket_price_minor": str(self.object.ticket_price_minor) if self.object.ticket_price_minor is not None else None},
+        )
+        return response
 
     def get_success_url(self):
         return reverse(
             "seating:section-list", kwargs={"venue_id": self.kwargs.get("venue_id")}
         )
+
+
+class SeatingSectionUpdateView(_RequiresOrganisationVenueAccess, UpdateView):
+    model = SeatingSection
+    form_class = SeatingSectionForm
+    template_name = "seating/section_form.html"
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["venue"] = self.object.venue
+        return context
+
+    def form_valid(self, form):
+        old_price = self.object.ticket_price_minor
+        old_supplement = self.object.price_modifier_minor
+        price_changed = "ticket_price_minor" in form.changed_data or "price_modifier_minor" in form.changed_data
+        response = super().form_valid(form)
+        if price_changed:
+            from audit.services import record
+            record(
+                action="seating_section_price_changed",
+                actor=self.request.user,
+                obj=self.object,
+                metadata={
+                    "old_ticket_price_minor": str(old_price) if old_price is not None else None,
+                    "new_ticket_price_minor": str(self.object.ticket_price_minor) if self.object.ticket_price_minor is not None else None,
+                    "old_supplement_minor": str(old_supplement),
+                    "new_supplement_minor": str(self.object.price_modifier_minor),
+                },
+            )
+        return response
+
+    def get_success_url(self):
+        return reverse("seating:section-list", kwargs={"venue_id": self.object.venue_id})
 
 
 class SeatingRowListView(_RequiresOrganisationEventAccess, ListView):
@@ -151,115 +219,23 @@ class SeatUpdateView(_RequiresOrganisationEventAccess, UpdateView):
 @customer_required
 @require_GET
 def event_seating_map(request, event_id):
-    """Customer-facing seating map for seat selection."""
+    """Compatibility route for the customer-facing seating map."""
     from ticketing.models import Event
 
     event = get_object_or_404(Event, pk=event_id, status__in=["published", "sales_open"])
-    if not event.sales_are_open():
-        return redirect("public-event-detail", pk=event.pk)
-    try:
-        event_seating = event.event_seating
-    except AttributeError:
-        return render(
-            request,
-            "seating/no_seating.html",
-            {"event": event},
-        )
-
-    sections = (
-        SeatingSection.objects.filter(venue=event_seating.venue)
-        .prefetch_related("rows__seats")
-        .order_by("sort_order", "name")
-    )
-
-    # Build seat data for the map
-    seat_data = []
-    for section in sections:
-        for row in section.rows.all():
-            for seat in row.seats.all():
-                seat_data.append(
-                    {
-                        "id": str(seat.id),
-                        "section": section.name,
-                        "row": row.name,
-                        "number": seat.number,
-                        "label": seat.label,
-                        "status": seat.status,
-                        "is_available": seat.is_currently_available,
-                        "is_accessible": seat.is_accessible,
-                        "is_restricted_view": seat.is_restricted_view,
-                    }
-                )
-
-    return render(
-        request,
-        "seating/seating_map.html",
-        {
-            "event": event,
-            "sections": sections,
-            "seat_data": seat_data,
-        },
-    )
+    return redirect("orders:order-create", event_id=event.pk)
 
 
 @customer_required
 @require_GET
 def event_seat_map(request, event_id):
-    """Customer-facing seating map with real-time availability."""
+    """Compatibility route; seat selection now lives inside checkout."""
     from ticketing.models import Event
 
     event = get_object_or_404(Event, pk=event_id, status__in=["published", "sales_open"])
     if not event.sales_are_open():
         return redirect("public-event-detail", pk=event.pk)
-    try:
-        event_seating = event.event_seating
-    except AttributeError:
-        return render(request, "seating/no_seating.html", {"event": event})
-
-    sections = (
-        SeatingSection.objects.filter(venue=event_seating.venue)
-        .prefetch_related("rows__seats")
-        .order_by("sort_order", "name")
-    )
-
-    seats_data = []
-    for section in sections:
-        for row in section.rows.all():
-            for seat in row.seats.all():
-                seat_info = {
-                    "id": str(seat.id),
-                    "label": seat.label,
-                    "section": section.name,
-                    "row": row.name,
-                    "number": seat.number,
-                    "status": seat.status,
-                    "is_available": seat.status == Seat.Status.AVAILABLE,
-                    "is_accessible": seat.is_accessible,
-                    "is_restricted_view": seat.is_restricted_view,
-                }
-                active_res = seat.reservations.filter(
-                    status=SeatReservation.Status.ACTIVE,
-                    expires_at__gt=timezone.now(),
-                ).first()
-                if active_res:
-                    seat_info["status"] = "reserved"
-                    seat_info["is_available"] = False
-                    seat_info["reservation_expires_at"] = active_res.expires_at.isoformat()
-                seats_data.append(seat_info)
-
-    availability = get_event_seat_availability(event)
-
-    return render(
-        request,
-        "seating/seating_map.html",
-        {
-            "event": event,
-            "sections": sections,
-            "seat_data": seats_data,
-            "availability": availability,
-            "ticket_price_minor": event.ticket_categories.order_by("price_minor").values_list("price_minor", flat=True).first() or 0,
-        },
-    )
+    return redirect("orders:order-create", event_id=event.pk)
 
 
 @customer_required

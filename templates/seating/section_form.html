@@ -24,9 +24,15 @@
               {% if form.color.errors %}<div class="text-danger small">{{ form.color.errors }}</div>{% endif %}
             </div>
             <div class="col-md-4">
+              <label class="form-label fw-semibold">{{ form.ticket_price_minor.label }}</label>
+              {{ form.ticket_price_minor }}
+              <div class="form-text">{{ form.ticket_price_minor.help_text }}</div>
+              {% if form.ticket_price_minor.errors %}<div class="text-danger small">{{ form.ticket_price_minor.errors }}</div>{% endif %}
+            </div>
+            <div class="col-md-4">
               <label class="form-label fw-semibold">{{ form.price_modifier_minor.label }}</label>
               {{ form.price_modifier_minor }}
-              <div class="form-text">Additional charge in Maloti.</div>
+              <div class="form-text">{{ form.price_modifier_minor.help_text }}</div>
               {% if form.price_modifier_minor.errors %}<div class="text-danger small">{{ form.price_modifier_minor.errors }}</div>{% endif %}
             </div>
             <div class="col-md-4">

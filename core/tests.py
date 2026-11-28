@@ -9,6 +9,12 @@ class HealthTests(SimpleTestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
 
+    def test_service_worker_is_available_at_root_scope(self):
+        response = self.client.get(reverse("service-worker"))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "application/javascript")
+        self.assertIn("/static/manifest.webmanifest", response.content.decode())
+
 
 @override_settings(EMAIL_BACKEND="django.core.mail.backends.locmem.EmailBackend", SUPPORT_EMAIL="kena.support@gmail.com")
 class PublicInformationTests(TestCase):

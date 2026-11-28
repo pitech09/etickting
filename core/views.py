@@ -1,20 +1,65 @@
-from django.http import JsonResponse
+import logging
+
 from django.conf import settings
-from django.db import connection
+from django.contrib import messages
 from django.core.cache import cache
 from django.core.mail import EmailMessage
-from django.contrib import messages
+from django.db import connection
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import redirect, render
 from django.views.decorators.http import require_http_methods
-import logging
 
 from .forms import ContactForm
 
 logger = logging.getLogger(__name__)
 
 
+SERVICE_WORKER = """const CACHE_NAME = \"kena-shell-v1\";
+const APP_SHELL = [\"/\", \"/static/manifest.webmanifest\", \"/static/icons/kena-192.png\", \"/static/icons/kena-512.png\"];
+
+self.addEventListener(\"install\", (event) => {
+  event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(APP_SHELL)));
+  self.skipWaiting();
+});
+
+self.addEventListener(\"activate\", (event) => {
+  event.waitUntil(
+    caches.keys().then((keys) => Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))))
+  );
+  self.clients.claim();
+});
+
+self.addEventListener(\"fetch\", (event) => {
+  if (event.request.method !== \"GET\") return;
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.origin !== self.location.origin) return;
+
+  if (requestUrl.pathname.startsWith(\"/static/\")) {
+    event.respondWith(caches.match(event.request).then((cached) => cached || fetch(event.request).then((response) => {
+      const copy = response.clone();
+      caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+      return response;
+    })));
+    return;
+  }
+
+  if (event.request.mode === \"navigate\") {
+    event.respondWith(fetch(event.request).catch(() => caches.match(\"/\")));
+  }
+});
+"""
+
+
 def health(request):
     return JsonResponse({"status": "ok", "service": "kena"})
+
+
+def service_worker(request):
+    return HttpResponse(
+        SERVICE_WORKER,
+        content_type="application/javascript",
+        headers={"Cache-Control": "no-cache"},
+    )
 
 
 def readiness(request):

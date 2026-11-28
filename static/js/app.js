@@ -3,7 +3,71 @@
   const banner = document.getElementById("network-status");
   const bannerText = document.getElementById("network-status-text");
   const retryButton = document.getElementById("network-retry");
+  const installButton = document.getElementById("install-app");
+  const routeLoading = document.getElementById("route-loading");
+  const feedback = document.getElementById("app-feedback");
   let reconnectTimer;
+  let installPrompt;
+
+  function announce(message, type = "info", duration = 6000) {
+    if (!feedback) return;
+    const item = document.createElement("div");
+    item.className = `alert alert-${type}`;
+    item.setAttribute("role", type === "danger" ? "alert" : "status");
+    item.textContent = message;
+    feedback.appendChild(item);
+    window.setTimeout(() => item.remove(), duration);
+  }
+
+  function setButtonBusy(button, label = "Processing…") {
+    if (!button || button.dataset.busy === "true") return;
+    button.dataset.busy = "true";
+    button.dataset.originalLabel = button.tagName === "INPUT" ? button.value : button.textContent.trim();
+    button.disabled = true;
+    button.setAttribute("aria-busy", "true");
+    if (button.tagName === "INPUT") {
+      button.value = label;
+    } else {
+      const spinner = document.createElement("span");
+      spinner.className = "button-spinner";
+      spinner.setAttribute("aria-hidden", "true");
+      button.prepend(spinner);
+      button.append(document.createTextNode(label));
+    }
+  }
+
+  function restoreButton(button) {
+    if (!button || button.dataset.busy !== "true") return;
+    if (button.tagName === "INPUT") button.value = button.dataset.originalLabel || "Continue";
+    else button.textContent = button.dataset.originalLabel || "Continue";
+    button.disabled = false;
+    button.removeAttribute("aria-busy");
+    delete button.dataset.busy;
+  }
+
+  window.KenaUI = { announce, setButtonBusy, restoreButton };
+
+  function setRouteLoading(visible) {
+    if (!routeLoading) return;
+    routeLoading.classList.toggle("is-visible", visible);
+    routeLoading.setAttribute("aria-hidden", String(!visible));
+  }
+
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => navigator.serviceWorker.register("/service-worker.js").catch((error) => console.warn("Kena offline support unavailable", error)));
+  }
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault();
+    installPrompt = event;
+    if (installButton) installButton.classList.remove("d-none");
+  });
+  if (installButton) installButton.addEventListener("click", async () => {
+    if (!installPrompt) return;
+    installPrompt.prompt();
+    await installPrompt.userChoice;
+    installPrompt = null;
+    installButton.classList.add("d-none");
+  });
 
   function showNetworkState(message, type, persistent) {
     if (!banner) return;
@@ -20,21 +84,27 @@
   }
 
   function setFormBusy(form) {
-    if (form.dataset.async === "true" || form.dataset.busy === "true") return;
+    if (form.dataset.async === "true" || form.dataset.noLoading === "true" || form.dataset.busy === "true") return;
     form.dataset.busy = "true";
     form.setAttribute("aria-busy", "true");
     const button = form.querySelector("button[type='submit'], input[type='submit']");
     if (!button) return;
     const label = (button.tagName === "INPUT" ? button.value : button.textContent).trim().replace(/…$/, "");
     const lower = label.toLowerCase();
-    const busyLabel = lower.includes("save") ? "Saving…" : lower.includes("create") ? "Creating…" : lower.includes("send") ? "Sending…" : lower.includes("update") ? "Updating…" : lower.includes("verify") ? "Verifying…" : "Processing…";
-    if (button.tagName === "INPUT") button.value = busyLabel;
-    else button.textContent = busyLabel;
-    button.disabled = true;
-    button.insertAdjacentHTML("afterbegin", '<span class="spinner-border spinner-border-sm me-2" aria-hidden="true"></span>');
+    const busyLabel = form.dataset.loadingMessage || (lower.includes("save") ? "Saving…" : lower.includes("create") ? "Creating…" : lower.includes("send") ? "Sending…" : lower.includes("upload") ? "Uploading…" : lower.includes("submit") ? "Submitting…" : lower.includes("verify") ? "Verifying…" : "Processing…");
+    setButtonBusy(button, busyLabel);
   }
 
-  document.addEventListener("submit", (event) => setFormBusy(event.target), true);
+  document.addEventListener("submit", (event) => {
+    if (event.target instanceof HTMLFormElement) setFormBusy(event.target);
+  }, true);
+  document.addEventListener("click", (event) => {
+    const link = event.target.closest("a[href]");
+    if (!link || event.defaultPrevented || event.button !== 0 || link.target === "_blank" || link.hasAttribute("download") || link.getAttribute("href").startsWith("#")) return;
+    const target = new URL(link.href, window.location.href);
+    if (target.origin === window.location.origin) setRouteLoading(true);
+  });
+  window.addEventListener("pageshow", () => setRouteLoading(false));
   window.addEventListener("offline", () => showNetworkState("You are offline. Unsaved changes are kept where possible. Retry when your connection returns.", "warning", true));
   window.addEventListener("online", () => showNetworkState("Connection restored. You can retry your request.", "success", false));
   if (retryButton) retryButton.addEventListener("click", () => window.location.reload());
@@ -48,18 +118,27 @@
     const selection = document.querySelector("[data-checkout-selection]");
     const quantityOutput = document.querySelector("[data-checkout-quantity]");
     const totalOutput = document.querySelector("[data-checkout-total]");
+    const reservedModifiersElement = document.getElementById("reserved-seat-modifiers");
     const prices = JSON.parse(priceDataElement.textContent);
+    const reservedModifiers = reservedModifiersElement ? JSON.parse(reservedModifiersElement.textContent) : [];
     function updateCheckoutSummary() {
       const price = Number(prices[category && category.value] || 0);
       const count = Math.max(1, Number(quantity && quantity.value || 1));
       const option = category && category.options[category.selectedIndex];
       if (selection) selection.textContent = option && option.value ? option.textContent : "Choose a ticket";
       if (quantityOutput) quantityOutput.textContent = option && option.value ? String(count) : "—";
-      if (totalOutput) totalOutput.textContent = (price * count).toFixed(2);
+      const reservedTotal = reservedModifiers.length
+        ? reservedModifiers.reduce((sum, modifier) => sum + price + Number(modifier), 0)
+        : price * count;
+      if (totalOutput) totalOutput.textContent = reservedTotal.toFixed(2);
     }
-    if (category) category.addEventListener("change", updateCheckoutSummary);
-    if (quantity) quantity.addEventListener("input", updateCheckoutSummary);
-    updateCheckoutSummary();
+    // Reserved-seat checkout owns the summary because its total includes
+    // section supplements for the exact seats selected.
+    if (!document.getElementById("seat-map")) {
+      if (category) category.addEventListener("change", updateCheckoutSummary);
+      if (quantity) quantity.addEventListener("input", updateCheckoutSummary);
+      updateCheckoutSummary();
+    }
   }
 
   const countdown = document.querySelector("[data-reservation-countdown]");
@@ -123,11 +202,33 @@
     const element = event.detail.elt;
     element.setAttribute("aria-busy", "true");
     element.classList.add("is-loading");
+    const button = element.matches("button") ? element : element.querySelector("button");
+    if (button) setButtonBusy(button, button.dataset.loadingMessage || "Loading…");
   });
   document.body.addEventListener("htmx:afterRequest", (event) => {
     const element = event.detail.elt;
     element.removeAttribute("aria-busy");
     element.classList.remove("is-loading");
+    const button = element.matches("button") ? element : element.querySelector("button");
+    if (button) restoreButton(button);
     if (!event.detail.successful) showNetworkState("We could not complete that request. Please try again.", "danger", false);
+  });
+  ["htmx:sendError", "htmx:responseError", "htmx:timeout"].forEach((eventName) => {
+    document.body.addEventListener(eventName, (event) => {
+      const element = event.detail.elt;
+      element.removeAttribute("aria-busy");
+      element.classList.remove("is-loading");
+      const button = element.matches("button") ? element : element.querySelector("button");
+      if (button) restoreButton(button);
+      announce("That request timed out or could not reach Kena. Please try again.", "danger");
+    });
+  });
+  window.addEventListener("error", (event) => {
+    console.error("Kena UI error", event.error || event.message);
+    announce("This page encountered a problem. Refresh and try again.", "danger");
+  });
+  window.addEventListener("unhandledrejection", (event) => {
+    console.error("Kena async error", event.reason);
+    announce("We could not complete that action. Please try again.", "danger");
   });
 })();

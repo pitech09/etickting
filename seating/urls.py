@@ -10,6 +10,7 @@ from .views import (
     SeatingRowListView,
     SeatingSectionCreateView,
     SeatingSectionListView,
+    SeatingSectionUpdateView,
     SeatUpdateView,
 )
 
@@ -26,6 +27,11 @@ urlpatterns = [
         "venues/<uuid:venue_id>/sections/create/",
         SeatingSectionCreateView.as_view(),
         name="section-create",
+    ),
+    path(
+        "sections/<uuid:pk>/edit/",
+        SeatingSectionUpdateView.as_view(),
+        name="section-update",
     ),
     # Section rows
     path(

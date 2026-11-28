@@ -2,6 +2,8 @@ from django.urls import path
 
 from .views import VenueDetailView, VenueListView, VenueUpdateView
 
+app_name = "venues"
+
 urlpatterns = [
     path("", VenueListView.as_view(), name="venue-list"),
     path("<uuid:pk>/", VenueDetailView.as_view(), name="venue-detail"),

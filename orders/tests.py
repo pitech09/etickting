@@ -1,7 +1,9 @@
+import base64
+import json
 from datetime import timedelta
 from decimal import Decimal
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -128,6 +130,170 @@ class CheckoutCorrectnessTests(TestCase):
 
 
 class SeatFulfillmentTests(TestCase):
+    def setUp(self):
+        self.owner = User.objects.create_user(email="reserved-buyer@example.com", password="pass-12345")
+        organisation = Organisation.objects.create(name="Reserved Org", slug="reserved-org")
+        venue = Venue.objects.create(organisation=organisation, name="Reserved Hall", slug="reserved-hall")
+        self.event = Event.objects.create(
+            organisation=organisation,
+            name="Reserved Event",
+            venue=venue,
+            ticketing_model=Event.TicketingModel.RESERVED_SEATING,
+            starts_at=timezone.now() + timedelta(days=2),
+            status=Event.Status.SALES_OPEN,
+        )
+        self.category = TicketCategory.objects.create(
+            event=self.event, name="Standard", price_minor="30.00", total_quantity=2, max_per_customer=2
+        )
+        EventSeating.objects.create(event=self.event, venue=venue)
+        section = SeatingSection.objects.create(venue=venue, name="Main")
+        self.section = section
+        row = SeatingRow.objects.create(section=section, name="A")
+        self.seats = [
+            Seat.objects.create(row=row, number=str(index), label=f"A-{index}")
+            for index in (1, 2)
+        ]
+
+    def test_reserved_checkout_accepts_exactly_selected_seat_quantity(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(
+            reverse("orders:order-create", args=[self.event.pk]),
+            {
+                "ticket_category": str(self.category.pk),
+                "quantity": "2",
+                "seat_ids": ",".join(str(seat.pk) for seat in self.seats),
+                "price": "0.00",
+                "idempotency_key": "reserved-two-seats",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        order = Order.objects.get(reference__isnull=False, customer=self.owner)
+        self.assertEqual(order.lines.filter(line_type=OrderLine.LineType.SEAT).count(), 2)
+        self.assertEqual(order.subtotal_minor, Decimal("60.00"))
+        self.assertEqual(SeatReservation.objects.filter(event=self.event, status=SeatReservation.Status.ACTIVE).count(), 2)
+        self.section.ticket_price_minor = "99.00"
+        self.section.save(update_fields=["ticket_price_minor"])
+        self.assertEqual(list(order.lines.values_list("unit_price_minor", flat=True)), [Decimal("30.00"), Decimal("30.00")])
+
+    def test_reserved_checkout_applies_section_supplement_per_seat(self):
+        self.section.price_modifier_minor = "5.50"
+        self.section.save(update_fields=["price_modifier_minor"])
+        self.client.force_login(self.owner)
+        response = self.client.post(
+            reverse("orders:order-create", args=[self.event.pk]),
+            {
+                "ticket_category": str(self.category.pk),
+                "quantity": "2",
+                "seat_ids": ",".join(str(seat.pk) for seat in self.seats),
+                "idempotency_key": "reserved-supplement",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        order = Order.objects.get(reference__isnull=False, customer=self.owner)
+        self.assertEqual(list(order.lines.values_list("unit_price_minor", flat=True)), [Decimal("35.50"), Decimal("35.50")])
+        self.assertEqual(order.total_minor, Decimal("71.00"))
+
+    def test_reserved_checkout_uses_section_ticket_price_over_category_price(self):
+        self.section.ticket_price_minor = "45.00"
+        self.section.price_modifier_minor = "5.00"
+        self.section.save(update_fields=["ticket_price_minor", "price_modifier_minor"])
+        self.client.force_login(self.owner)
+        response = self.client.post(
+            reverse("orders:order-create", args=[self.event.pk]),
+            {
+                "ticket_category": str(self.category.pk),
+                "quantity": "1",
+                "seat_ids": str(self.seats[0].pk),
+                "idempotency_key": "section-base-price",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        order = Order.objects.get(reference__isnull=False, customer=self.owner)
+        self.assertEqual(order.lines.get().unit_price_minor, Decimal("50.00"))
+        self.assertEqual(order.total_minor, Decimal("50.00"))
+
+    def test_reserved_checkout_allows_a_genuinely_free_ticket(self):
+        self.category.price_minor = "0.00"
+        self.category.save(update_fields=["price_minor"])
+        self.client.force_login(self.owner)
+        response = self.client.post(
+            reverse("orders:order-create", args=[self.event.pk]),
+            {
+                "ticket_category": str(self.category.pk),
+                "quantity": "1",
+                "seat_ids": str(self.seats[0].pk),
+                "idempotency_key": "reserved-free-seat",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        order = Order.objects.get(reference__isnull=False, customer=self.owner)
+        self.assertEqual(order.total_minor, Decimal("0.00"))
+
+    def test_reserved_checkout_rejects_quantity_mismatch(self):
+        self.client.force_login(self.owner)
+        response = self.client.post(
+            reverse("orders:order-create", args=[self.event.pk]),
+            {
+                "ticket_category": str(self.category.pk),
+                "quantity": "2",
+                "seat_ids": str(self.seats[0].pk),
+                "idempotency_key": "reserved-one-of-two",
+            },
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Choose exactly 2 seat(s)")
+        self.assertFalse(Order.objects.filter(customer=self.owner).exists())
+
+    @override_settings(TICKETING_SIGNING_KEYS=json.dumps({"test-key": base64.urlsafe_b64encode(b"1" * 32).decode()}))
+    def test_paid_reserved_order_issues_one_ticket_per_selected_seat(self):
+        order = Order.objects.create(
+            customer=self.owner, event=self.event, status=Order.Status.PAID, total_minor="60.00"
+        )
+        reservations = [
+            SeatReservation.objects.create(
+                event=self.event,
+                seat=seat,
+                session_key="paid-session",
+                expires_at=timezone.now() + timedelta(minutes=10),
+            )
+            for seat in self.seats
+        ]
+        for seat, reservation in zip(self.seats, reservations):
+            OrderLine.objects.create(
+                order=order,
+                line_type=OrderLine.LineType.SEAT,
+                ticket_category=self.category,
+                seat=seat,
+                seat_reservation=reservation,
+                unit_price_minor="30.00",
+                quantity=1,
+                line_total_minor="30.00",
+            )
+
+        tickets = fulfill_paid_order(order_id=order.pk)
+
+        self.assertEqual(len(tickets), 2)
+        self.assertEqual(set(Ticket.objects.filter(order=order).values_list("seat_label", flat=True)), {"A-1", "A-2"})
+        self.assertEqual(SeatReservation.objects.filter(event=self.event, status=SeatReservation.Status.CONVERTED).count(), 2)
+
+    def test_reserved_seat_map_exposes_quantity_controls_and_seats(self):
+        self.client.force_login(self.owner)
+        response = self.client.get(reverse("seating:event-seat-map", args=[self.event.pk]))
+
+        self.assertRedirects(response, reverse("orders:order-create", args=[self.event.pk]))
+        checkout = self.client.get(reverse("orders:order-create", args=[self.event.pk]))
+        self.assertEqual(checkout.status_code, 200)
+        self.assertContains(checkout, 'id="seat-map"')
+        self.assertContains(checkout, "A-1")
+        self.assertContains(checkout, "A-2")
+        self.assertContains(checkout, "30.00")
+        self.assertContains(checkout, "Select as many seats")
+
     def test_expired_reservation_cannot_be_fulfilled(self):
         owner = User.objects.create_user(email="seat-buyer@example.com", password="pass-12345")
         organisation = Organisation.objects.create(name="Seat Org", slug="seat-org")

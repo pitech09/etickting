@@ -1,5 +1,5 @@
 {{ seat_data|json_script:"seat-map-data" }}
+{{ ticket_categories|json_script:"ticket-category-data" }}
 <script>
 const EVENT_ID = "{{ event.id }}";
-window.SEAT_PRICE_MINOR = Number("{{ ticket_price_minor|default:0 }}");
 </script>
