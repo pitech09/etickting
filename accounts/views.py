@@ -1,6 +1,5 @@
 from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
-from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.forms import PasswordChangeForm
 from django.contrib.auth import login, update_session_auth_hash
 from django.contrib import messages
@@ -8,6 +7,7 @@ from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
 from django.shortcuts import redirect, render
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.utils import timezone
 from django.views import View
 
@@ -48,7 +48,7 @@ class RegisterView(View):
             except ValueError as exc:
                 form.add_error(None, str(exc))
             else:
-                login(request, user)
+                request.session["pending_phone_verification_user_id"] = str(user.pk)
                 messages.success(request, "Your account was created. Verify your phone number to continue.")
                 return redirect("phone-verify")
         return render(request, self.template_name, {"form": form})
@@ -85,7 +85,7 @@ class OrganiserRegisterView(View):
             except ValueError as exc:
                 form.add_error(None, str(exc))
             else:
-                login(request, user)
+                request.session["pending_phone_verification_user_id"] = str(user.pk)
                 messages.success(request, "Your account was created. Verify your phone number to continue.")
                 return redirect("phone-verify")
         return render(request, self.template_name, {"form": form})
@@ -93,7 +93,28 @@ class OrganiserRegisterView(View):
 
 class LoginView(auth_views.LoginView):
     template_name = "accounts/login.html"
-    redirect_authenticated_user = True
+    redirect_authenticated_user = False
+
+    def form_valid(self, form):
+        user = form.get_user()
+        if not user.phone_verified_at:
+            try:
+                issue_otp(
+                    user=user,
+                    phone=user.phone_number,
+                    purpose="phone_verification",
+                    ip_address=self.request.META.get("REMOTE_ADDR", ""),
+                )
+            except ValueError as exc:
+                form.add_error(None, str(exc))
+                return self.form_invalid(form)
+            self.request.session["pending_phone_verification_user_id"] = str(user.pk)
+            next_url = self.get_redirect_url()
+            if next_url and url_has_allowed_host_and_scheme(next_url, {self.request.get_host()}):
+                self.request.session["pending_phone_verification_next"] = next_url
+            messages.info(self.request, "Verify your phone number before signing in. A new code was sent by SMS.")
+            return redirect("phone-verify")
+        return super().form_valid(form)
 
     def get_success_url(self):
         if self.get_redirect_url():
@@ -150,32 +171,51 @@ def account_settings(request):
     })
 
 
-class PhoneVerificationView(LoginRequiredMixin, View):
+class PhoneVerificationView(View):
     template_name = "accounts/phone_verification.html"
 
+    def get_user(self, request):
+        if request.user.is_authenticated:
+            return request.user
+        user_id = request.session.get("pending_phone_verification_user_id")
+        if not user_id:
+            return None
+        return User.objects.filter(pk=user_id, is_active=True).first()
+
     def get(self, request):
-        return render(request, self.template_name, {"phone": request.user.phone_number or ""})
+        user = self.get_user(request)
+        if not user:
+            return redirect("login")
+        return render(request, self.template_name, {"phone": user.phone_number or ""})
 
     def post(self, request):
+        user = self.get_user(request)
+        if not user:
+            return redirect("login")
         phone = request.POST.get("phone", "")
         code = request.POST.get("code", "").strip()
         if code:
-            if verify_otp(user=request.user, code=code, purpose="phone_verification", phone=request.user.phone_number):
-                request.user.phone_verified_at = timezone.now()
-                request.user.save(update_fields=["phone_verified_at"])
+            if verify_otp(user=user, code=code, purpose="phone_verification", phone=user.phone_number):
+                user.phone_verified_at = timezone.now()
+                user.save(update_fields=["phone_verified_at"])
                 messages.success(request, "Your phone number has been verified.")
+                if not request.user.is_authenticated:
+                    login(request, user)
+                    next_url = request.session.pop("pending_phone_verification_next", "")
+                    request.session.pop("pending_phone_verification_user_id", None)
+                    return redirect(next_url or get_post_login_redirect(user))
                 return redirect("account-settings")
             messages.error(request, "That code is invalid or expired.")
         else:
             try:
                 phone = normalize_phone(phone)
-                if User.objects.filter(phone_number=phone).exclude(pk=request.user.pk).exists():
+                if User.objects.filter(phone_number=phone).exclude(pk=user.pk).exists():
                     raise ValueError("That phone number is already in use.")
                 with transaction.atomic():
-                    request.user.phone_number = phone
-                    request.user.phone_verified_at = None
-                    request.user.save(update_fields=["phone_number", "phone_verified_at"])
-                    issue_otp(user=request.user, phone=phone, purpose="phone_verification", ip_address=request.META.get("REMOTE_ADDR", ""))
+                    user.phone_number = phone
+                    user.phone_verified_at = None
+                    user.save(update_fields=["phone_number", "phone_verified_at"])
+                    issue_otp(user=user, phone=phone, purpose="phone_verification", ip_address=request.META.get("REMOTE_ADDR", ""))
                 messages.success(request, "A verification code was sent by SMS.")
             except ValueError as exc:
                 messages.error(request, str(exc))

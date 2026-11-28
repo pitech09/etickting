@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from .models import User
 from organisations.models import Organisation, OrganisationMembership
@@ -21,19 +22,19 @@ class AuthenticationTests(TestCase):
         self.assertRedirects(response, f"{reverse('login')}?next={reverse('dashboard')}")
 
     def test_customer_login_goes_to_upcoming_events(self):
-        User.objects.create_user(email="customer@example.com", password="pass-12345")
+        User.objects.create_user(email="customer@example.com", password="pass-12345", phone_verified_at=timezone.now())
         response = self.client.post(reverse("login"), {"username": "customer@example.com", "password": "pass-12345"})
         self.assertRedirects(response, reverse("public-event-list"))
 
     def test_organisation_member_login_goes_to_workspace(self):
-        user = User.objects.create_user(email="organiser@example.com", password="pass-12345")
+        user = User.objects.create_user(email="organiser@example.com", password="pass-12345", phone_verified_at=timezone.now())
         organisation = Organisation.objects.create(name="Events", slug="events")
         OrganisationMembership.objects.create(organisation=organisation, user=user, role=OrganisationMembership.Role.OWNER)
         response = self.client.post(reverse("login"), {"username": "organiser@example.com", "password": "pass-12345"})
         self.assertRedirects(response, reverse("dashboard"))
 
     def test_platform_admin_login_goes_to_admin(self):
-        User.objects.create_superuser(email="admin@example.com", password="pass-12345")
+        User.objects.create_superuser(email="admin@example.com", password="pass-12345", phone_verified_at=timezone.now())
         response = self.client.post(reverse("login"), {"username": "admin@example.com", "password": "pass-12345"})
         self.assertRedirects(response, reverse("admin:index"))
 
@@ -49,6 +50,34 @@ class AuthenticationTests(TestCase):
         issue_otp.assert_called_once()
         user = User.objects.get(email="owner@example.com")
         self.assertTrue(user.organisation_memberships.filter(role="owner", organisation__name="Mountain Events").exists())
+
+    @patch("accounts.views.issue_otp")
+    def test_unverified_login_requires_phone_verification(self, issue_otp):
+        user = User.objects.create_user(
+            email="unverified@example.com",
+            password="pass-12345",
+            phone_number="+2665838175",
+        )
+
+        response = self.client.post(reverse("login"), {
+            "username": user.email,
+            "password": "pass-12345",
+        })
+
+        self.assertRedirects(response, reverse("phone-verify"))
+        self.assertFalse(response.wsgi_request.user.is_authenticated)
+        self.assertEqual(self.client.session["pending_phone_verification_user_id"], str(user.pk))
+        issue_otp.assert_called_once()
+
+    def test_registration_does_not_authenticate_before_phone_verification(self):
+        with patch("accounts.views.issue_otp"):
+            response = self.client.post(reverse("register"), {
+                "first_name": "Pending", "last_name": "User", "email": "pending@example.com",
+                "phone_number": "05838176", "password1": "A-strong-passphrase-123", "password2": "A-strong-passphrase-123",
+            })
+
+        self.assertRedirects(response, reverse("phone-verify"))
+        self.assertFalse(response.wsgi_request.user.is_authenticated)
 
     def test_customer_cannot_open_organiser_dashboard(self):
         user = User.objects.create_user(email="customer-only@example.com", password="pass-12345")
