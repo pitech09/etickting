@@ -22,6 +22,8 @@ dependencies = [
     "qrcode[pil]>=8,<9",
     "Pillow>=10,<13",
     "django-storages[s3]>=1.14,<2",
+    "cloudinary",
+    "django-cloudinary-storage",
 ]
 
 [project.optional-dependencies]
