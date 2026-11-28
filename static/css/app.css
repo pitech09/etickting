@@ -119,6 +119,14 @@ body {
 .nav-inner { min-height: 4rem; }
 .navbar-brand { letter-spacing: -.04em; font-size: 1.1rem; }
 .brand-logo { display: block; width: 3.4rem; height: 3.4rem; max-width: 100%; padding: .18rem; border: 1px solid rgba(255,255,255,.35); border-radius: .85rem; object-fit: contain; background: #fff; box-shadow: 0 .35rem .9rem rgba(0,0,0,.18); }
+
+.category-section-map { display: grid; grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr)); gap: 1rem; }
+.category-section-card { border: 1px solid #dfe5ed; border-radius: 1rem; padding: 1rem; background: #fff; transition: border-color .15s ease, box-shadow .15s ease; }
+.category-section-card.is-selected { border-color: #101d32; box-shadow: 0 0 0 .2rem rgba(16,29,50,.1); }
+.category-section-seats { display: grid; gap: .35rem; padding: .6rem; border-radius: .7rem; background: #f4f6f9; }
+.category-section-row { display: flex; align-items: center; gap: .25rem; min-height: 1.35rem; }
+.category-section-row > span { width: 1.2rem; color: #68758a; font-size: .7rem; font-weight: 700; }
+.category-section-row i { display: block; width: .72rem; height: .72rem; border-radius: .2rem; background: #aeb9c8; }
 .navbar-brand { display: inline-flex; align-items: center; min-height: 3.5rem; }
 .auth-brand { display: inline-flex; align-items: center; width: fit-content; border-radius: 1.35rem; }
 .auth-brand .brand-logo { width: 6rem; height: 6rem; border: 0; border-radius: 1.35rem; padding: .3rem; box-shadow: 0 1rem 2rem rgba(0,0,0,.2); }

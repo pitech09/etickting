@@ -9,7 +9,7 @@ from django.utils import timezone
 
 from accounts.models import User
 from organisations.models import Organisation
-from seating.models import EventSeating, Seat, SeatReservation, SeatingRow, SeatingSection
+from seating.models import EventSectionPricing, EventSeating, Seat, SeatReservation, SeatingRow, SeatingSection
 from ticketing.models import Event, Ticket, TicketCategory
 from venues.models import Venue
 
@@ -230,6 +230,30 @@ class SeatFulfillmentTests(TestCase):
         order = Order.objects.get(reference__isnull=False, customer=self.owner)
         self.assertEqual(order.lines.get().unit_price_minor, Decimal("50.00"))
         self.assertEqual(order.total_minor, Decimal("50.00"))
+
+    def test_reserved_checkout_uses_event_section_category_price_and_ignores_tampering(self):
+        EventSectionPricing.objects.create(
+            event=self.event,
+            section=self.section,
+            ticket_category=self.category,
+            price_minor="75.00",
+        )
+        self.client.force_login(self.owner)
+        response = self.client.post(
+            reverse("orders:order-create", args=[self.event.pk]),
+            {
+                "ticket_category": str(self.category.pk),
+                "quantity": "2",
+                "seat_ids": ",".join(str(seat.pk) for seat in self.seats),
+                "price": "0.01",
+                "idempotency_key": "event-section-price",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        order = Order.objects.get(customer=self.owner)
+        self.assertEqual(list(order.lines.values_list("unit_price_minor", flat=True)), [Decimal("75.00"), Decimal("75.00")])
+        self.assertEqual(order.total_minor, Decimal("150.00"))
 
     def test_reserved_checkout_allows_a_genuinely_free_ticket(self):
         self.category.price_minor = "0.00"

@@ -17,6 +17,7 @@
             <th>Name</th>
             <th>Description</th>
             <th>Price</th>
+            <th>Seating sections</th>
             <th>Inventory</th>
             <th>Limit/customer</th>
             <th>Status</th>
@@ -29,6 +30,7 @@
             <td>{{ category.name }}</td>
             <td class="text-secondary small">{{ category.description|default:'-' }}</td>
             <td>M {{ category.price_maloti|floatformat:2 }}</td>
+            <td>{% for pricing in category.section_pricing.all %}<span class="badge text-bg-light me-1">{{ pricing.section.name }} · M {{ pricing.price_minor|floatformat:2 }}</span>{% empty %}<span class="text-secondary small">Category price fallback</span>{% endfor %}</td>
             <td>
               <span class="badge text-bg-{% if category.is_sold_out %}danger{% else %}primary{% endif %}">
                 {{ category.sold_count }} / {{ category.total_quantity }}

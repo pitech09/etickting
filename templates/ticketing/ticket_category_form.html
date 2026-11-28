@@ -54,6 +54,31 @@
               {% if form.is_active.errors %}<div class="text-danger small">{{ form.is_active.errors }}</div>{% endif %}
             </div>
           </div>
+          {% if form.section_ids %}
+          <section class="section-assignment-panel mt-4" aria-labelledby="section-assignment-heading">
+            <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+              <div><h2 id="section-assignment-heading" class="h5 mb-1">Where is this category located?</h2><p class="text-secondary small mb-0">Select sections on the real venue layout and set the effective price for each section.</p></div>
+              <span class="badge text-bg-light">Reserved seating</span>
+            </div>
+            {% if section_map_sections %}
+            <div class="category-section-map" data-section-assignment-map>
+              {% for section in section_map_sections %}
+              <article class="category-section-card{% if section.id|stringformat:'s' in selected_section_ids %} is-selected{% endif %}" data-section-card>
+                <label class="d-flex align-items-start gap-2 mb-2">
+                  <input class="form-check-input mt-1" type="checkbox" name="section_ids" value="{{ section.id }}"{% if section.id|stringformat:'s' in selected_section_ids %} checked{% endif %} data-section-checkbox>
+                  <span><strong>{{ section.name }}</strong><small class="d-block text-secondary">{{ section.seat_count }} seat{{ section.seat_count|pluralize }}</small></span>
+                </label>
+                <div class="category-section-seats" aria-label="{{ section.name }} seating location">
+                  {% for row in section.rows.all %}<div class="category-section-row"><span>{{ row.name }}</span>{% for seat in row.seats.all %}<i title="{{ seat.label }}" aria-hidden="true"></i>{% endfor %}</div>{% empty %}<span class="small text-secondary">No seats configured yet.</span>{% endfor %}
+                </div>
+                {% for item in section_price_fields %}{% if item.section.id == section.id %}<div class="mt-3"><label class="form-label small fw-semibold" for="{{ item.field.id_for_label }}">{{ item.field.label }}</label>{{ item.field }}{% for error in item.field.errors %}<div class="text-danger small" role="alert">{{ error }}</div>{% endfor %}</div>{% endif %}{% endfor %}
+              </article>
+              {% endfor %}
+            </div>
+            {% else %}<div class="alert alert-warning mb-0">This venue has no seating layout yet. Configure sections and seats before assigning this category.</div>{% endif %}
+            {% for error in form.section_ids.errors %}<div class="text-danger small mt-2" role="alert">{{ error }}</div>{% endfor %}
+          </section>
+          {% endif %}
           <div class="d-flex justify-content-between mt-4">
             <a href="{% url 'ticketing:ticket-category-list' event.id %}" class="btn btn-outline-secondary">Cancel</a>
             <button class="btn btn-primary">{% if object %}Save changes{% else %}Add category{% endif %}</button>
@@ -63,4 +88,10 @@
     </div>
   </div>
 </div>
+{% if form.section_ids %}<script>
+document.querySelectorAll('[data-section-card]').forEach((card) => {
+  const checkbox = card.querySelector('[data-section-checkbox]');
+  checkbox?.addEventListener('change', () => card.classList.toggle('is-selected', checkbox.checked));
+});
+</script>{% endif %}
 {% endblock %}

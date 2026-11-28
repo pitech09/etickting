@@ -4,6 +4,7 @@ from decimal import Decimal
 from django.conf import settings
 from django.db import models
 from django.db.models import Q
+from django.core.validators import MinValueValidator
 
 
 class SeatingSection(models.Model):
@@ -190,6 +191,58 @@ class EventSeating(models.Model):
         return Seat.objects.filter(
             row__section__venue=self.venue, row__section__is_active=True
         ).count()
+
+
+class EventSectionPricing(models.Model):
+    """Event-specific category and price assignment for a venue section.
+
+    Venue sections describe the reusable physical layout. This model keeps
+    event pricing and category assignment separate so later event changes do
+    not rewrite historical order-line snapshots.
+    """
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    event = models.ForeignKey(
+        "ticketing.Event", on_delete=models.CASCADE, related_name="section_pricing"
+    )
+    section = models.ForeignKey(
+        SeatingSection, on_delete=models.CASCADE, related_name="event_pricing"
+    )
+    ticket_category = models.ForeignKey(
+        "ticketing.TicketCategory",
+        on_delete=models.CASCADE,
+        related_name="section_pricing",
+    )
+    price_minor = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        validators=[MinValueValidator(Decimal("0.00"))],
+        help_text="Effective ticket price per seat in Maloti.",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("section__sort_order", "section__name")
+        constraints = [
+            models.UniqueConstraint(
+                fields=("event", "section"),
+                name="unique_event_section_pricing",
+            ),
+        ]
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+
+        if self.event_id and self.ticket_category_id and self.ticket_category.event_id != self.event_id:
+            raise ValidationError("The ticket category must belong to this event.")
+        if self.event_id and self.section_id:
+            event_seating = getattr(self.event, "event_seating", None)
+            if not event_seating or event_seating.venue_id != self.section.venue_id:
+                raise ValidationError("The seating section must belong to this event's venue.")
+
+    def __str__(self):
+        return f"{self.event.name} — {self.section.name} — {self.ticket_category.name}"
 
 
 class SeatReservation(models.Model):

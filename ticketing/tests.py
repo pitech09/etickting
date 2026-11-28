@@ -15,7 +15,8 @@ from PIL import Image
 
 from accounts.models import User
 from organisations.models import Organisation, OrganisationMembership
-from seating.models import EventSeating, Seat
+from seating.models import EventSectionPricing, EventSeating, Seat, SeatingRow, SeatingSection
+from venues.models import Venue
 
 from .inventory import inventory_snapshot
 from .models import Admission, AdmissionReversal, Event, ResaleListing, ScanAttempt, ScannerDevice, Ticket, TicketCategory, TicketCredential
@@ -511,3 +512,50 @@ class EventCreationPricingTests(TestCase):
         self.assertTrue(EventSeating.objects.filter(event=event, venue=event.venue).exists())
         self.assertEqual(Seat.objects.filter(row__section__venue=event.venue).count(), 12)
         self.assertEqual(event.ticket_categories.get().total_quantity, 12)
+        pricing = EventSectionPricing.objects.get(event=event)
+        self.assertEqual(pricing.ticket_category, event.ticket_categories.get())
+        self.assertEqual(pricing.price_minor, Decimal("250.00"))
+
+    def test_category_creation_assigns_real_sections_and_prices(self):
+        venue = Venue.objects.create(
+            organisation=self.organisation,
+            name="Category Hall",
+            slug="category-hall",
+        )
+        event = Event.objects.create(
+            organisation=self.organisation,
+            venue=venue,
+            name="Category Event",
+            ticketing_model=Event.TicketingModel.RESERVED_SEATING,
+            starts_at=timezone.now() + timedelta(days=10),
+        )
+        EventSeating.objects.create(event=event, venue=venue)
+        vip = SeatingSection.objects.create(venue=venue, name="VIP", color="#111111")
+        standard = SeatingSection.objects.create(venue=venue, name="Standard", color="#222222")
+        for section in (vip, standard):
+            row = SeatingRow.objects.create(section=section, name="A")
+            Seat.objects.create(row=row, number="1", label=f"{section.name}-A1")
+
+        self.client.force_login(self.organiser)
+        response = self.client.post(
+            reverse("ticketing:ticket-category-create", args=[event.pk]),
+            {
+                "name": "VIP",
+                "description": "Front section",
+                "price_maloti": "500.00",
+                "total_quantity": "1",
+                "max_per_customer": "1",
+                "sales_opens_at": "",
+                "sales_closes_at": "",
+                "is_active": "on",
+                "section_ids": [str(vip.pk)],
+                f"section_price_{vip.pk}": "650.00",
+                f"section_price_{standard.pk}": "200.00",
+            },
+        )
+
+        self.assertRedirects(response, reverse("ticketing:ticket-category-list", args=[event.pk]))
+        pricing = EventSectionPricing.objects.get(event=event, section=vip)
+        self.assertEqual(pricing.ticket_category.name, "VIP")
+        self.assertEqual(pricing.price_minor, Decimal("650.00"))
+        self.assertFalse(EventSectionPricing.objects.filter(event=event, section=standard).exists())

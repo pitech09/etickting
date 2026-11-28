@@ -5,13 +5,30 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from .models import EventSeating, Seat, SeatAllocation, SeatReservation
+from .models import EventSectionPricing, EventSeating, Seat, SeatAllocation, SeatReservation
 
 
 def calculate_seat_price(*, category, seat):
     """Calculate a reserved seat's configured price in Maloti."""
     try:
-        configured_section_price = seat.row.section.ticket_price_minor
+        section_pricing = EventSectionPricing.objects.filter(
+            event=category.event_id,
+            section=seat.row.section_id,
+            ticket_category=category,
+        ).first()
+        assigned_section = EventSectionPricing.objects.filter(
+            event=category.event_id,
+            section=seat.row.section_id,
+        ).first()
+        if assigned_section and assigned_section.ticket_category_id != category.id:
+            raise ValueError("This seat belongs to a different ticket category.")
+        if not section_pricing and EventSectionPricing.objects.filter(event=category.event_id).exists():
+            raise ValueError("This seat has no ticket category pricing configured.")
+        configured_section_price = (
+            section_pricing.price_minor
+            if section_pricing
+            else seat.row.section.ticket_price_minor
+        )
         base_price = Decimal(str(
             configured_section_price if configured_section_price is not None else category.price_minor
         ))
@@ -37,6 +54,15 @@ def get_customer_seat_map_data(event):
         .prefetch_related("rows__seats")
         .order_by("sort_order", "name")
     )
+    section_pricing = {
+        pricing.section_id: pricing
+        for pricing in EventSectionPricing.objects.filter(
+            event=event,
+            section__venue=event_seating.venue,
+            ticket_category__is_active=True,
+        ).select_related("ticket_category")
+    }
+    section_pricing_enabled = EventSectionPricing.objects.filter(event=event).exists()
     seats = [seat for section in sections for row in section.rows.all() for seat in row.seats.all()]
     seat_ids = [seat.id for seat in seats]
     allocated_seat_ids = set(
@@ -70,7 +96,17 @@ def get_customer_seat_map_data(event):
                         if section.ticket_price_minor is not None else None
                     ),
                     "section_price_modifier_minor": str(section.price_modifier_minor),
+                    "section_pricing_enabled": section_pricing_enabled,
                 }
+                pricing = section_pricing.get(section.id)
+                if pricing:
+                    seat_info.update({
+                        "ticket_category_id": str(pricing.ticket_category_id),
+                        "ticket_category_name": pricing.ticket_category.name,
+                        "event_section_price_minor": str(pricing.price_minor),
+                    })
+                else:
+                    seat_info["event_section_price_minor"] = None
                 if seat.id in allocated_seat_ids:
                     seat_info.update(status="sold", is_available=False)
                 active_reservation = active_reservations.get(seat.id)

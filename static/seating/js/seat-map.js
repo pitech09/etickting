@@ -48,6 +48,10 @@
     if (seat.status === "unavailable") return "seat-unavailable";
     return "seat-available";
   }
+  function seatAllowed(seat) {
+    if (!seat.section_pricing_enabled) return true;
+    return String(seat.ticket_category_id || "") === String(categoryEl.value || "");
+  }
   function toggleSeat(seat) {
     if (selectedSeatIds.has(seat.id)) selectedSeatIds.delete(seat.id);
     else if (selectedSeatIds.size < quantity()) selectedSeatIds.add(seat.id);
@@ -69,7 +73,8 @@
       const sectionSeats = Object.values(rows).flat();
       const sectionPrice = sectionSeats.length ? seatPriceMinor(sectionSeats[0]) : null;
       const supplement = sectionSeats.length ? moneyToMinor(sectionSeats[0].section_price_modifier_minor) : null;
-      sectionLabel.textContent = `${sectionName} · ${sectionPrice === null ? "Pricing unavailable" : `M ${formatMinor(sectionPrice)} per seat`}${supplement > 0n ? ` (includes M ${formatMinor(supplement)} supplement)` : ""}`;
+      const categoryName = sectionSeats[0]?.ticket_category_name;
+      sectionLabel.textContent = `${sectionName}${categoryName ? ` · ${categoryName}` : ""} · ${sectionPrice === null ? "Pricing unavailable" : `M ${formatMinor(sectionPrice)} per seat`}${supplement > 0n ? ` (includes M ${formatMinor(supplement)} supplement)` : ""}`;
       sectionDiv.appendChild(sectionLabel);
       Object.entries(rows).forEach(([rowName, seats]) => {
         const rowDiv = document.createElement("div");
@@ -87,7 +92,9 @@
           const price = seatPriceMinor(seat);
           button.title = `${seat.label} · ${price === null ? "Price unavailable" : `M ${formatMinor(price)}`}`;
           button.setAttribute("aria-label", `Seat ${seat.label}, ${isSelected ? "selected" : seat.status}`);
-          button.disabled = !seat.is_available && !isSelected;
+          const allowed = seatAllowed(seat);
+          button.disabled = !allowed || (!seat.is_available && !isSelected);
+          if (!allowed) button.classList.add("seat-unavailable");
           if (seat.is_accessible) button.classList.add("seat-accessible");
           if (seat.is_restricted_view) button.classList.add("seat-restricted");
           if (!button.disabled || isSelected) button.addEventListener("click", () => toggleSeat(seat));
@@ -104,7 +111,7 @@
     const count = selected.length;
     const prices = selected.map(seatPriceMinor);
     const categoryPrice = moneyToMinor(selectedCategory()?.price_minor ?? selectedCategory()?.price);
-    const hasInvalidPrice = categoryPrice === null || prices.some((price) => price === null);
+    const hasInvalidPrice = categoryPrice === null || selected.some((seat) => !seatAllowed(seat)) || prices.some((price) => price === null);
     const total = hasInvalidPrice ? null : prices.reduce((sum, price) => sum + price, 0n);
     selectedList.innerHTML = count ? selected.map((seat, index) => `<span class="badge text-bg-primary me-1 mb-1">${seat.label} · ${prices[index] === null ? "Price unavailable" : `M ${formatMinor(prices[index])}`}</span>`).join("") : '<p class="text-secondary small mb-0">No seats selected yet.</p>';
     totalEl.innerHTML = hasInvalidPrice
@@ -122,7 +129,8 @@
     if (summaryTotal) summaryTotal.textContent = total === null ? "—" : formatMinor(total);
   }
   function seatPriceMinor(seat) {
-    const base = moneyToMinor(seat.section_ticket_price_minor)
+    const base = moneyToMinor(seat.event_section_price_minor)
+      ?? moneyToMinor(seat.section_ticket_price_minor)
       ?? moneyToMinor(selectedCategory()?.price_minor ?? selectedCategory()?.price);
     const supplement = moneyToMinor(seat.section_price_modifier_minor ?? "0.00");
     return base === null || supplement === null ? null : base + supplement;

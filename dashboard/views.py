@@ -342,7 +342,12 @@ def public_event_list(request):
 
 
 def public_event_detail(request, pk):
-    event = get_object_or_404(_public_events(), pk=pk)
+    event = get_object_or_404(
+        _public_events().prefetch_related(
+            "ticket_categories__section_pricing__section",
+        ),
+        pk=pk,
+    )
     return render(request, "public/event_detail.html", {"event": event})
 
 

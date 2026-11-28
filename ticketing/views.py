@@ -18,7 +18,7 @@ from django.utils.text import slugify
 from decimal import Decimal
 
 from organisations.models import OrganisationMembership
-from seating.models import EventSeating, Seat, SeatingRow, SeatingSection
+from seating.models import EventSectionPricing, EventSeating, Seat, SeatingRow, SeatingSection
 from venues.models import Venue
 
 from .forms import EventForm, TicketCategoryForm
@@ -110,21 +110,36 @@ class EventCreateView(_RequiresEventManagerAccess, CreateView):
             venue = self._save_venue(form, organisation)
             form.instance.venue = venue
             response = super().form_valid(form)
-            self._save_ticket_category(form)
+            category = self._save_ticket_category(form)
             self._ensure_reserved_seating(form)
+            self._ensure_default_section_pricing(category)
         messages.success(
             self.request, f'Event "{self.object.name}" was created as a draft.'
         )
         return response
 
     def _save_ticket_category(self, form):
-        TicketCategory.objects.create(
+        return TicketCategory.objects.create(
             event=self.object,
             name=form.cleaned_data["ticket_name"],
             price_minor=form.cleaned_data["ticket_price_maloti"],
             total_quantity=form.cleaned_data["ticket_quantity"],
             max_per_customer=form.cleaned_data["ticket_max_per_customer"],
         )
+
+    def _ensure_default_section_pricing(self, category):
+        if self.object.ticketing_model != Event.TicketingModel.RESERVED_SEATING:
+            return
+        sections = SeatingSection.objects.filter(venue=self.object.venue)
+        EventSectionPricing.objects.bulk_create([
+            EventSectionPricing(
+                event=self.object,
+                section=section,
+                ticket_category=category,
+                price_minor=category.price_minor,
+            )
+            for section in sections
+        ])
 
     def _save_venue(self, form, organisation):
         venue = form.instance.venue
@@ -255,7 +270,7 @@ class EventUpdateView(_RequiresEventManagerAccess, UpdateView):
                 category.max_per_customer = form.cleaned_data["ticket_max_per_customer"]
                 category.save(update_fields=["name", "price_minor", "total_quantity", "max_per_customer", "updated_at"])
             else:
-                TicketCategory.objects.create(
+                category = TicketCategory.objects.create(
                     event=self.object,
                     name=form.cleaned_data["ticket_name"],
                     price_minor=form.cleaned_data["ticket_price_maloti"],
@@ -263,6 +278,17 @@ class EventUpdateView(_RequiresEventManagerAccess, UpdateView):
                     max_per_customer=form.cleaned_data["ticket_max_per_customer"],
                 )
             self._ensure_reserved_seating(form)
+            if self.object.ticketing_model == Event.TicketingModel.RESERVED_SEATING and not EventSectionPricing.objects.filter(event=self.object).exists():
+                sections = SeatingSection.objects.filter(venue=self.object.venue)
+                EventSectionPricing.objects.bulk_create([
+                    EventSectionPricing(
+                        event=self.object,
+                        section=section,
+                        ticket_category=category,
+                        price_minor=category.price_minor,
+                    )
+                    for section in sections
+                ])
         messages.success(
             self.request, f'Event "{self.object.name}" was updated.'
         )
@@ -389,6 +415,22 @@ class EventCompleteView(_RequiresEventManagerAccess, View):
         return redirect("ticketing:event-detail", pk=event.pk)
 
 
+def _section_assignment_context(form):
+    """Prepare the real venue layout used by the category assignment UI."""
+    if "section_ids" not in form.fields:
+        return {"section_map_sections": [], "section_price_fields": [], "selected_section_ids": set()}
+    sections = list(form.fields["section_ids"].queryset.prefetch_related("rows__seats"))
+    selected = form["section_ids"].value() or []
+    return {
+        "section_map_sections": sections,
+        "selected_section_ids": {str(value) for value in selected},
+        "section_price_fields": [
+            {"section": section, "field": form[f"section_price_{section.pk}"]}
+            for section in sections
+        ],
+    }
+
+
 class TicketCategoryListView(_RequiresOrganisationEventAccess, ListView):
     model = TicketCategory
     template_name = "ticketing/ticket_category_list.html"
@@ -404,6 +446,7 @@ class TicketCategoryListView(_RequiresOrganisationEventAccess, ListView):
         return (
             TicketCategory.objects.filter(event=self.event)
             .select_related("event")
+            .prefetch_related("section_pricing__section")
             .order_by("name")
         )
 
@@ -427,15 +470,37 @@ class TicketCategoryCreateView(_RequiresEventManagerAccess, CreateView):
         )
         return super().dispatch(request, *args, **kwargs)
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["event"] = self.event
+        return kwargs
+
     def form_valid(self, form):
         form.instance.event = self.event
         form.instance.price_minor = form.cleaned_data["price_maloti"]
-        response = super().form_valid(form)
+        with transaction.atomic():
+            response = super().form_valid(form)
+            self._save_section_pricing(form)
         messages.success(
             self.request,
             f'Ticket category "{self.object.name}" was created.',
         )
         return response
+
+    def _save_section_pricing(self, form):
+        sections = list(form.cleaned_data.get("section_ids") or [])
+        EventSectionPricing.objects.filter(
+            event=self.event, ticket_category=self.object,
+        ).exclude(section__in=sections).delete()
+        for section in sections:
+            EventSectionPricing.objects.update_or_create(
+                event=self.event,
+                section=section,
+                defaults={
+                    "ticket_category": self.object,
+                    "price_minor": form.cleaned_data[f"section_price_{section.pk}"],
+                },
+            )
 
     def get_success_url(self):
         return reverse(
@@ -446,6 +511,7 @@ class TicketCategoryCreateView(_RequiresEventManagerAccess, CreateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["event"] = self.event
+        context.update(_section_assignment_context(context["form"]))
         return context
 
 
@@ -459,9 +525,28 @@ class TicketCategoryUpdateView(_RequiresEventManagerAccess, UpdateView):
             event__organisation__memberships__user=self.request.user
         )
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs["event"] = self.object.event
+        return kwargs
+
     def form_valid(self, form):
         form.instance.price_minor = form.cleaned_data["price_maloti"]
-        response = super().form_valid(form)
+        with transaction.atomic():
+            response = super().form_valid(form)
+            sections = list(form.cleaned_data.get("section_ids") or [])
+            EventSectionPricing.objects.filter(
+                event=self.object.event, ticket_category=self.object,
+            ).exclude(section__in=sections).delete()
+            for section in sections:
+                EventSectionPricing.objects.update_or_create(
+                    event=self.object.event,
+                    section=section,
+                    defaults={
+                        "ticket_category": self.object,
+                        "price_minor": form.cleaned_data[f"section_price_{section.pk}"],
+                    },
+                )
         messages.success(
             self.request,
             f'Ticket category "{self.object.name}" was updated.',
@@ -477,6 +562,7 @@ class TicketCategoryUpdateView(_RequiresEventManagerAccess, UpdateView):
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context["event"] = self.object.event
+        context.update(_section_assignment_context(context["form"]))
         return context
 
 

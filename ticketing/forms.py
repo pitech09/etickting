@@ -2,7 +2,7 @@ from decimal import Decimal
 
 from django import forms
 
-from seating.models import SeatingRow
+from seating.models import EventSectionPricing, SeatingRow, SeatingSection
 from venues.models import Venue
 
 from .models import Event, Ticket, TicketCategory
@@ -132,10 +132,43 @@ class TicketCategoryForm(forms.ModelForm):
         label="Price (M)",
     )
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, event=None, **kwargs):
+        instance = kwargs.get("instance")
+        self.event = event or (instance.event if instance and instance.pk else None)
         super().__init__(*args, **kwargs)
         if self.instance and self.instance.pk:
             self.initial["price_maloti"] = self.instance.price_minor
+        if self.event and self.event.ticketing_model == Event.TicketingModel.RESERVED_SEATING:
+            sections = SeatingSection.objects.filter(
+                venue__event_seatings__event=self.event,
+            ).order_by("sort_order", "name")
+            self.fields["section_ids"] = forms.ModelMultipleChoiceField(
+                label="Seating sections",
+                queryset=sections,
+                required=False,
+                widget=forms.CheckboxSelectMultiple,
+                help_text="Select sections where this category can be purchased.",
+            )
+            existing = {
+                pricing.section_id: pricing
+                for pricing in EventSectionPricing.objects.filter(
+                    event=self.event,
+                    ticket_category=self.instance if self.instance and self.instance.pk else None,
+                )
+            } if self.instance and self.instance.pk else {}
+            self.initial["section_ids"] = list(existing)
+            for section in sections:
+                field_name = f"section_price_{section.pk}"
+                self.fields[field_name] = forms.DecimalField(
+                    label=f"{section.name} price (M)",
+                    max_digits=10,
+                    decimal_places=2,
+                    min_value=Decimal("0.00"),
+                    required=False,
+                    widget=forms.NumberInput(attrs={"min": "0", "step": "0.01", "placeholder": "0.00"}),
+                )
+                if section.id in existing:
+                    self.initial[field_name] = existing[section.id].price_minor
 
     class Meta:
         model = TicketCategory
@@ -169,3 +202,23 @@ class TicketCategoryForm(forms.ModelForm):
         if limit is not None and limit < 1:
             raise forms.ValidationError("Max per customer must be at least 1.")
         return limit
+
+    def clean(self):
+        cleaned_data = super().clean()
+        sections = list(cleaned_data.get("section_ids") or [])
+        if self.event and self.event.ticketing_model == Event.TicketingModel.RESERVED_SEATING and not sections:
+            self.add_error("section_ids", "Select at least one seating section for a reserved-seating category.")
+        for section in sections:
+            price = cleaned_data.get(f"section_price_{section.pk}")
+            if price is None:
+                self.add_error(f"section_price_{section.pk}", "Set a price for every selected section.")
+        if self.event and sections:
+            existing = EventSectionPricing.objects.filter(
+                event=self.event,
+                section__in=sections,
+            ).exclude(ticket_category=self.instance if self.instance and self.instance.pk else None)
+            conflicts = {pricing.section_id: pricing.ticket_category.name for pricing in existing.select_related("section", "ticket_category")}
+            for section in sections:
+                if section.id in conflicts:
+                    self.add_error("section_ids", f"{section.name} is already assigned to {conflicts[section.id]}.")
+        return cleaned_data
