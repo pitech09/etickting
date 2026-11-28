@@ -2,7 +2,7 @@ from django.contrib.auth import views as auth_views
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.contrib.auth.forms import PasswordChangeForm
-from django.contrib.auth import login
+from django.contrib.auth import login, update_session_auth_hash
 from django.contrib import messages
 from django.contrib.auth.password_validation import validate_password
 from django.db import transaction
@@ -36,8 +36,21 @@ class RegisterView(View):
     def post(self, request):
         form = RegistrationForm(request.POST)
         if form.is_valid():
-            form.save()
-            return redirect("login")
+            try:
+                with transaction.atomic():
+                    user = form.save()
+                    issue_otp(
+                        user=user,
+                        phone=user.phone_number,
+                        purpose="phone_verification",
+                        ip_address=request.META.get("REMOTE_ADDR", ""),
+                    )
+            except ValueError as exc:
+                form.add_error(None, str(exc))
+            else:
+                login(request, user)
+                messages.success(request, "Your account was created. Verify your phone number to continue.")
+                return redirect("phone-verify")
         return render(request, self.template_name, {"form": form})
 
 
@@ -50,19 +63,31 @@ class OrganiserRegisterView(View):
     def post(self, request):
         form = OrganiserRegistrationForm(request.POST)
         if form.is_valid():
-            with transaction.atomic():
-                user = form.save()
-                organisation_form = OrganisationForm({
-                    "name": form.cleaned_data["organisation_name"],
-                    "description": form.cleaned_data["organisation_description"],
-                })
-                organisation = organisation_form.save()
-                OrganisationMembership.objects.create(
-                    organisation=organisation,
-                    user=user,
-                    role=OrganisationMembership.Role.OWNER,
-                )
-            return redirect("login")
+            try:
+                with transaction.atomic():
+                    user = form.save()
+                    organisation_form = OrganisationForm({
+                        "name": form.cleaned_data["organisation_name"],
+                        "description": form.cleaned_data["organisation_description"],
+                    })
+                    organisation = organisation_form.save()
+                    OrganisationMembership.objects.create(
+                        organisation=organisation,
+                        user=user,
+                        role=OrganisationMembership.Role.OWNER,
+                    )
+                    issue_otp(
+                        user=user,
+                        phone=user.phone_number,
+                        purpose="phone_verification",
+                        ip_address=request.META.get("REMOTE_ADDR", ""),
+                    )
+            except ValueError as exc:
+                form.add_error(None, str(exc))
+            else:
+                login(request, user)
+                messages.success(request, "Your account was created. Verify your phone number to continue.")
+                return redirect("phone-verify")
         return render(request, self.template_name, {"form": form})
 
 
@@ -89,15 +114,35 @@ def account_settings(request):
         if request.POST.get("action") == "password":
             password_form = PasswordChangeForm(request.user, request.POST)
             if password_form.is_valid():
-                password_form.save()
+                user = password_form.save()
+                update_session_auth_hash(request, user)
+                messages.success(request, "Your password was updated. You are still signed in.")
                 return redirect("account-settings")
         else:
             details_form = AccountDetailsForm(request.POST, instance=request.user)
             if details_form.is_valid():
                 user = details_form.save(commit=False)
                 if user.phone_number != current_phone:
-                    user.phone_verified_at = None
+                    try:
+                        with transaction.atomic():
+                            user.phone_verified_at = None
+                            user.save(update_fields=["first_name", "last_name", "email", "phone_number", "phone_verified_at"])
+                            issue_otp(
+                                user=user,
+                                phone=user.phone_number,
+                                purpose="phone_verification",
+                                ip_address=request.META.get("REMOTE_ADDR", ""),
+                            )
+                    except ValueError as exc:
+                        details_form.add_error("phone_number", str(exc))
+                        return render(request, "accounts/settings.html", {
+                            "details_form": details_form,
+                            "password_form": password_form,
+                        })
+                    messages.success(request, "Your details were saved. Enter the SMS code to verify your new phone number.")
+                    return redirect("phone-verify")
                 user.save(update_fields=["first_name", "last_name", "email", "phone_number", "phone_verified_at"])
+                messages.success(request, "Your personal details were saved.")
                 return redirect("account-settings")
     return render(request, "accounts/settings.html", {
         "details_form": details_form,
@@ -126,10 +171,11 @@ class PhoneVerificationView(LoginRequiredMixin, View):
                 phone = normalize_phone(phone)
                 if User.objects.filter(phone_number=phone).exclude(pk=request.user.pk).exists():
                     raise ValueError("That phone number is already in use.")
-                request.user.phone_number = phone
-                request.user.phone_verified_at = None
-                request.user.save(update_fields=["phone_number", "phone_verified_at"])
-                issue_otp(user=request.user, phone=phone, purpose="phone_verification", ip_address=request.META.get("REMOTE_ADDR", ""))
+                with transaction.atomic():
+                    request.user.phone_number = phone
+                    request.user.phone_verified_at = None
+                    request.user.save(update_fields=["phone_number", "phone_verified_at"])
+                    issue_otp(user=request.user, phone=phone, purpose="phone_verification", ip_address=request.META.get("REMOTE_ADDR", ""))
                 messages.success(request, "A verification code was sent by SMS.")
             except ValueError as exc:
                 messages.error(request, str(exc))

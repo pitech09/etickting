@@ -1,10 +1,13 @@
 from .models import Notification
 from django.conf import settings
 from django.core.mail import send_mail
+from django.urls import reverse
 
 
-def notify(*, user, title, message):
-    return Notification.objects.create(user=user, title=title, message=message)
+def notify(*, user, title, message, action_url=""):
+    if action_url and not action_url.startswith("/"):
+        raise ValueError("Notification action links must be internal paths")
+    return Notification.objects.create(user=user, title=title, message=message, action_url=action_url)
 
 
 def deliver_ticket(*, ticket):
@@ -17,13 +20,17 @@ def deliver_ticket(*, ticket):
     )
     email_sent = False
     if ticket.owner.email:
-        send_mail(
+        email_sent = bool(send_mail(
             subject=f"Your eTickting ticket for {ticket.event.name}",
             message=message,
             from_email=getattr(settings, "DEFAULT_FROM_EMAIL", "tickets@etickting.local"),
             recipient_list=[ticket.owner.email],
             fail_silently=True,
-        )
-        email_sent = True
-    notification = notify(user=ticket.owner, title="Ticket issued", message=message)
+        ))
+    notification = notify(
+        user=ticket.owner,
+        title="Ticket issued",
+        message=message,
+        action_url=reverse("ticketing:ticket-detail", args=[ticket.pk]),
+    )
     return {"email_sent": email_sent, "sms_sent": False, "notification_id": notification.id}

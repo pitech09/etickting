@@ -20,11 +20,12 @@ from .views import (
     public_verify_page,
     scan,
     scanner_page,
+    attendee_list,
     attendee_search,
     manual_admit,
     reverse_manual_admission,
 )
-from .wallet import ticket_detail, ticket_qr, update_attendee, wallet
+from .wallet import resend_ticket, ticket_detail, ticket_qr, update_attendee, wallet
 from .offline import reconcile_offline_scans, upload_offline_scans
 from .marketplace import listing_create, listing_list, listing_purchase
 
@@ -36,6 +37,7 @@ urlpatterns = [
     path("wallet/", wallet, name="ticket-wallet"),
     path("wallet/<uuid:pk>/", ticket_detail, name="ticket-detail"),
     path("wallet/<uuid:pk>/attendee/", update_attendee, name="ticket-attendee-update"),
+    path("wallet/<uuid:pk>/resend/", resend_ticket, name="ticket-resend"),
     path("wallet/<uuid:pk>/qr.png", ticket_qr, name="ticket-qr"),
     path("marketplace/", listing_list, name="marketplace"),
     path("wallet/<uuid:ticket_id>/resell/", listing_create, name="marketplace-list"),
@@ -52,6 +54,7 @@ urlpatterns = [
     path("verify/page/", public_verify_page, name="ticket-public-verify-page"),
     path("verify/", public_verify, name="ticket-public-verify"),
     path("events/<uuid:event_id>/scan/console/", scanner_page, name="ticket-scanner-page"),
+    path("events/<uuid:event_id>/attendees/", attendee_list, name="attendee-list"),
     path("events/<uuid:event_id>/scan/", scan, name="ticket-scan"),
     path("events/<uuid:event_id>/scan/search/", attendee_search, name="ticket-attendee-search"),
     path("events/<uuid:event_id>/scan/manual-admit/", manual_admit, name="ticket-manual-admit"),

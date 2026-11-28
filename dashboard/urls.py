@@ -1,6 +1,6 @@
 from django.urls import path
 
-from .views import customer_dashboard, dashboard, event_attendee_export, payment_proof, pending_payments, platform_dashboard, platform_event_action, platform_user_toggle, public_event_detail, public_event_list, public_home, review_payment
+from .views import customer_dashboard, dashboard, customer_refunds, event_attendee_export, event_organiser_refunds, event_pending_payments, organiser_refund_complete, organiser_refund_fail, organiser_refund_review, organiser_refund_start, organiser_refunds, payment_proof, pending_payments, platform_dashboard, platform_event_action, platform_user_toggle, public_event_detail, public_event_list, public_home, request_order_refund, review_payment
 
 urlpatterns = [
     path("", public_home, name="home"),
@@ -11,8 +11,17 @@ urlpatterns = [
     path("platform/users/<int:user_id>/toggle/", platform_user_toggle, name="platform-user-toggle"),
     path("platform/events/<uuid:event_id>/action/", platform_event_action, name="platform-event-action"),
     path("dashboard/pending-payments/", pending_payments, name="pending-payments"),
+    path("dashboard/events/<uuid:event_id>/payments/", event_pending_payments, name="event-pending-payments"),
     path("dashboard/pending-payments/<uuid:payment_id>/review/", review_payment, name="review-payment"),
     path("dashboard/pending-payments/<uuid:payment_id>/proof/", payment_proof, name="payment-proof"),
     path("dashboard/events/<uuid:event_id>/attendees.csv", event_attendee_export, name="event-attendee-export"),
     path("account/", customer_dashboard, name="customer-dashboard"),
+    path("account/refunds/", customer_refunds, name="customer-refunds"),
+    path("account/orders/<uuid:order_id>/refund-request/", request_order_refund, name="order-refund-request"),
+    path("dashboard/refunds/", organiser_refunds, name="organiser-refunds"),
+    path("dashboard/events/<uuid:event_id>/refunds/", event_organiser_refunds, name="event-organiser-refunds"),
+    path("dashboard/refunds/<uuid:refund_id>/review/", organiser_refund_review, name="organiser-refund-review"),
+    path("dashboard/refunds/<uuid:refund_id>/start/", organiser_refund_start, name="organiser-refund-start"),
+    path("dashboard/refunds/<uuid:refund_id>/complete/", organiser_refund_complete, name="organiser-refund-complete"),
+    path("dashboard/refunds/<uuid:refund_id>/fail/", organiser_refund_fail, name="organiser-refund-fail"),
 ]

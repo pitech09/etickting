@@ -204,3 +204,65 @@ class PaymentReview(models.Model):
 
     class Meta:
         ordering = ("-created_at",)
+
+
+class RefundRequest(models.Model):
+    """An auditable customer refund entitlement and execution record."""
+
+    class Status(models.TextChoices):
+        REQUESTED = "requested", "Requested"
+        UNDER_REVIEW = "under_review", "Under review"
+        APPROVED = "approved", "Approved"
+        REJECTED = "rejected", "Rejected"
+        PROCESSING = "processing", "Processing"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed / intervention required"
+
+    class NotificationStatus(models.TextChoices):
+        PENDING = "pending", "Pending"
+        SENT = "sent", "Sent"
+        FAILED = "failed", "Failed"
+
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    order = models.ForeignKey("orders.Order", on_delete=models.PROTECT, related_name="refund_requests")
+    payment = models.ForeignKey(Payment, on_delete=models.PROTECT, related_name="refund_requests")
+    requester = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.PROTECT, related_name="refund_requests")
+    reviewer = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="reviewed_refunds")
+    executor = models.ForeignKey(settings.AUTH_USER_MODEL, null=True, blank=True, on_delete=models.SET_NULL, related_name="executed_refunds")
+    requested_amount_minor = models.DecimalField(max_digits=12, decimal_places=2)
+    approved_amount_minor = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    status = models.CharField(max_length=24, choices=Status.choices, default=Status.REQUESTED)
+    reason = models.TextField()
+    review_note = models.TextField(blank=True)
+    execution_note = models.TextField(blank=True)
+    provider_reference = models.CharField(max_length=200, blank=True)
+    is_event_cancellation = models.BooleanField(default=False)
+    notification_status = models.CharField(max_length=16, choices=NotificationStatus.choices, default=NotificationStatus.PENDING)
+    notification_error = models.TextField(blank=True)
+    requested_at = models.DateTimeField(auto_now_add=True)
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    processing_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ("-requested_at",)
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(requested_amount_minor__gt=0),
+                name="refund_request_amount_positive",
+            ),
+            models.CheckConstraint(
+                condition=models.Q(approved_amount_minor__isnull=True) | models.Q(approved_amount_minor__gt=0),
+                name="refund_approved_amount_positive",
+            ),
+            models.UniqueConstraint(
+                fields=("order", "is_event_cancellation"),
+                condition=models.Q(is_event_cancellation=True),
+                name="one_event_cancellation_refund_per_order",
+            ),
+        ]
+
+    @property
+    def approved_amount_maloti(self):
+        return self.approved_amount_minor or 0

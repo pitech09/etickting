@@ -43,6 +43,8 @@ class TicketAuthenticityTests(TestCase):
         self.organisation = Organisation.objects.create(name="Authentic Events", slug="authentic-events")
         self.staff = User.objects.create_user(email="staff@example.com", password="pass-12345")
         OrganisationMembership.objects.create(organisation=self.organisation, user=self.staff, role=OrganisationMembership.Role.EVENT_STAFF)
+        self.manager = User.objects.create_user(email="manager@example.com", password="pass-12345")
+        OrganisationMembership.objects.create(organisation=self.organisation, user=self.manager, role=OrganisationMembership.Role.EVENT_MANAGER)
         self.event = Event.objects.create(organisation=self.organisation, name="Verified Night", starts_at=timezone.now(), status=Event.Status.PUBLISHED)
         self.device = ScannerDevice.objects.create(device_id="scanner-1", event=self.event, user=self.staff)
 
@@ -246,6 +248,23 @@ class TicketAuthenticityTests(TestCase):
         self.client.force_login(self.other)
         self.assertEqual(self.client.get(f"/tickets/wallet/{ticket.pk}/").status_code, 404)
 
+    def test_customer_can_resend_valid_ticket_without_exposing_credential(self):
+        ticket, _credential = self.issue()
+        from notifications.models import Notification
+
+        before = Notification.objects.filter(user=self.owner).count()
+        self.client.force_login(self.owner)
+        response = self.client.post(reverse("ticketing:ticket-resend", args=[ticket.pk]))
+        self.assertRedirects(response, reverse("ticketing:ticket-detail", args=[ticket.pk]))
+        self.assertEqual(Notification.objects.filter(user=self.owner).count(), before + 1)
+        self.assertNotContains(response, _credential, status_code=302)
+
+    def test_customer_cannot_resend_another_customers_ticket(self):
+        ticket, _credential = self.issue()
+        self.client.force_login(self.other)
+        response = self.client.post(reverse("ticketing:ticket-resend", args=[ticket.pk]))
+        self.assertEqual(response.status_code, 404)
+
     def test_marketplace_page_is_public(self):
         response = self.client.get(reverse("ticketing:marketplace"))
         self.assertEqual(response.status_code, 200)
@@ -367,7 +386,7 @@ class TicketAuthenticityTests(TestCase):
         self.assertContains(response, reverse("ticketing:ticket-category-delete", args=[category.pk]))
 
     def test_ticket_category_form_accepts_maloti_values(self):
-        self.client.force_login(self.staff)
+        self.client.force_login(self.manager)
         response = self.client.post(
             reverse("ticketing:ticket-category-create", args=[self.event.id]),
             {
@@ -385,7 +404,7 @@ class TicketAuthenticityTests(TestCase):
         self.assertEqual(TicketCategory.objects.get(name="VIP").price_minor, Decimal("150.50"))
 
     def test_event_can_be_unpublished_and_completed_through_lifecycle_actions(self):
-        self.client.force_login(self.staff)
+        self.client.force_login(self.manager)
         unpublished = self.client.post(reverse("ticketing:event-unpublish", args=[self.event.pk]))
         self.assertEqual(unpublished.status_code, 302)
         self.assertEqual(Event.objects.get(pk=self.event.pk).status, Event.Status.DRAFT)

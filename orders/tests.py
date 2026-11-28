@@ -15,6 +15,7 @@ from .fulfillment import fulfill_paid_order
 from .models import InventoryHold, Order, OrderLine
 from .services import expire_order_if_holds_expired
 from finance.models import PlatformCommissionConfig
+from payments.models import Payment
 
 
 class CheckoutCorrectnessTests(TestCase):
@@ -43,6 +44,28 @@ class CheckoutCorrectnessTests(TestCase):
 
         self.assertEqual(Order.objects.filter(customer=self.customer).count(), 1)
         self.assertRedirects(second, first["Location"])
+
+    def test_checkout_shows_price_summary_and_safe_retry_message(self):
+        response = self.client.get(reverse("orders:order-create", args=[self.event.pk]))
+
+        self.assertContains(response, "Estimated total")
+        self.assertContains(response, "25.00")
+        self.assertContains(response, "safety key")
+
+    def test_purchase_history_shows_payment_ticket_and_event_links(self):
+        order = Order.objects.create(customer=self.customer, event=self.event, total_minor="25.00")
+        Payment.objects.create(
+            order=order,
+            provider=Payment.Provider.MPESA,
+            status=Payment.Status.PENDING,
+            amount_minor="25.00",
+        )
+
+        response = self.client.get(reverse("orders:order-list"))
+
+        self.assertContains(response, "Pending")
+        self.assertContains(response, "View order")
+        self.assertContains(response, "View event")
 
     def test_new_checkout_has_no_customer_fee_and_snapshots_commission(self):
         config = PlatformCommissionConfig.current()
@@ -88,6 +111,20 @@ class CheckoutCorrectnessTests(TestCase):
         order.refresh_from_db()
         self.assertEqual(order.status, Order.Status.EXPIRED)
         self.assertEqual(order.inventory_holds.get().status, InventoryHold.Status.EXPIRED)
+
+    def test_order_detail_shows_active_reservation_expiry(self):
+        order = Order.objects.create(customer=self.customer, event=self.event, total_minor="25.00")
+        InventoryHold.objects.create(
+            order=order,
+            ticket_category=self.category,
+            quantity=1,
+            expires_at=timezone.now() + timedelta(minutes=8),
+        )
+
+        response = self.client.get(reverse("orders:order-detail", args=[order.pk]))
+
+        self.assertContains(response, "Your ticket reservation expires in")
+        self.assertContains(response, "data-reservation-countdown")
 
 
 class SeatFulfillmentTests(TestCase):

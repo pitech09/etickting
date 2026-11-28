@@ -7,6 +7,7 @@ from django.core.exceptions import PermissionDenied, ValidationError
 from django.db import transaction
 from django.http import JsonResponse
 from django.db.models import Q
+from django.core.paginator import Paginator
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse, reverse_lazy
 from django.utils import timezone
@@ -21,7 +22,7 @@ from seating.models import EventSeating, Seat, SeatingRow, SeatingSection
 from venues.models import Venue
 
 from .forms import EventForm, TicketCategoryForm
-from .models import Admission, Event, TicketCategory
+from .models import Admission, Event, Ticket, TicketCategory
 from .services import admit_ticket, verify_credential
 from .inventory import inventory_snapshot
 
@@ -53,6 +54,21 @@ class _RequiresOrganisationEventAccess(LoginRequiredMixin):
         return super().dispatch(request, *args, **kwargs)
 
 
+class _RequiresEventManagerAccess(_RequiresOrganisationEventAccess):
+    """Restrict event-changing operations to organisation owners and managers."""
+
+    def dispatch(self, request, *args, **kwargs):
+        if not (request.user.is_staff or request.user.is_superuser) and not OrganisationMembership.objects.filter(
+            user=request.user,
+            role__in=(
+                OrganisationMembership.Role.OWNER,
+                OrganisationMembership.Role.EVENT_MANAGER,
+            ),
+        ).exists():
+            raise PermissionDenied("Only organisation owners and event managers can change events.")
+        return super().dispatch(request, *args, **kwargs)
+
+
 class EventListView(_RequiresOrganisationEventAccess, ListView):
     model = Event
     template_name = "ticketing/event_list.html"
@@ -68,7 +84,7 @@ class EventListView(_RequiresOrganisationEventAccess, ListView):
         )
 
 
-class EventCreateView(_RequiresOrganisationEventAccess, CreateView):
+class EventCreateView(_RequiresEventManagerAccess, CreateView):
     model = Event
     form_class = EventForm
     template_name = "ticketing/event_form.html"
@@ -181,8 +197,24 @@ class EventDetailView(_RequiresOrganisationEventAccess, DetailView):
     template_name = "ticketing/event_detail.html"
     context_object_name = "event"
 
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context["can_manage_event"] = (
+            self.request.user.is_staff
+            or self.request.user.is_superuser
+            or OrganisationMembership.objects.filter(
+                user=self.request.user,
+                organisation=self.object.organisation,
+                role__in=(
+                    OrganisationMembership.Role.OWNER,
+                    OrganisationMembership.Role.EVENT_MANAGER,
+                ),
+            ).exists()
+        )
+        return context
 
-class EventUpdateView(_RequiresOrganisationEventAccess, UpdateView):
+
+class EventUpdateView(_RequiresEventManagerAccess, UpdateView):
     model = Event
     form_class = EventForm
     template_name = "ticketing/event_form.html"
@@ -253,7 +285,7 @@ class EventUpdateView(_RequiresOrganisationEventAccess, UpdateView):
         return reverse("ticketing:event-detail", kwargs={"pk": self.object.pk})
 
 
-class EventPublishView(_RequiresOrganisationEventAccess, View):
+class EventPublishView(_RequiresEventManagerAccess, View):
     @transaction.atomic
     def post(self, request, pk):
         event = get_object_or_404(
@@ -276,7 +308,7 @@ class EventPublishView(_RequiresOrganisationEventAccess, View):
         return redirect("ticketing:event-detail", pk=event.pk)
 
 
-class EventSalesOpenView(_RequiresOrganisationEventAccess, View):
+class EventSalesOpenView(_RequiresEventManagerAccess, View):
     @transaction.atomic
     def post(self, request, pk):
         event = get_object_or_404(
@@ -300,7 +332,7 @@ class EventSalesOpenView(_RequiresOrganisationEventAccess, View):
         return redirect("ticketing:event-detail", pk=event.pk)
 
 
-class EventUnpublishView(_RequiresOrganisationEventAccess, View):
+class EventUnpublishView(_RequiresEventManagerAccess, View):
     @transaction.atomic
     def post(self, request, pk):
         event = get_object_or_404(Event.objects.filter(organisation__memberships__user=request.user), pk=pk)
@@ -313,7 +345,7 @@ class EventUnpublishView(_RequiresOrganisationEventAccess, View):
         return redirect("ticketing:event-detail", pk=event.pk)
 
 
-class EventCancelView(_RequiresOrganisationEventAccess, View):
+class EventCancelView(_RequiresEventManagerAccess, View):
     @transaction.atomic
     def post(self, request, pk):
         from orders.models import InventoryHold, Order
@@ -334,11 +366,17 @@ class EventCancelView(_RequiresOrganisationEventAccess, View):
             Ticket.objects.filter(event=event, status__in=[Ticket.Status.ISSUED, Ticket.Status.ADMITTED]).update(
                 status=Ticket.Status.CANCELLED, updated_at=timezone.now()
             )
-            messages.warning(request, f'Event "{event.name}" was cancelled. Online tickets are non-refundable; contact support for event-cancellation guidance.')
+            from payments.services import create_event_cancellation_refunds
+
+            refund_entitlements = create_event_cancellation_refunds(event=event, actor=request.user)
+            messages.warning(
+                request,
+                f'Event "{event.name}" was cancelled. {len(refund_entitlements)} refund entitlement(s) were recorded; payment return remains a separate processing step.',
+            )
         return redirect("ticketing:event-detail", pk=event.pk)
 
 
-class EventCompleteView(_RequiresOrganisationEventAccess, View):
+class EventCompleteView(_RequiresEventManagerAccess, View):
     @transaction.atomic
     def post(self, request, pk):
         event = get_object_or_404(Event.objects.filter(organisation__memberships__user=request.user), pk=pk)
@@ -375,7 +413,7 @@ class TicketCategoryListView(_RequiresOrganisationEventAccess, ListView):
         return context
 
 
-class TicketCategoryCreateView(_RequiresOrganisationEventAccess, CreateView):
+class TicketCategoryCreateView(_RequiresEventManagerAccess, CreateView):
     model = TicketCategory
     form_class = TicketCategoryForm
     template_name = "ticketing/ticket_category_form.html"
@@ -411,7 +449,7 @@ class TicketCategoryCreateView(_RequiresOrganisationEventAccess, CreateView):
         return context
 
 
-class TicketCategoryUpdateView(_RequiresOrganisationEventAccess, UpdateView):
+class TicketCategoryUpdateView(_RequiresEventManagerAccess, UpdateView):
     model = TicketCategory
     form_class = TicketCategoryForm
     template_name = "ticketing/ticket_category_form.html"
@@ -442,7 +480,7 @@ class TicketCategoryUpdateView(_RequiresOrganisationEventAccess, UpdateView):
         return context
 
 
-class TicketCategoryDeleteView(_RequiresOrganisationEventAccess, DeleteView):
+class TicketCategoryDeleteView(_RequiresEventManagerAccess, DeleteView):
     model = TicketCategory
     template_name = "ticketing/ticket_category_confirm_delete.html"
 
@@ -567,6 +605,35 @@ def _scanner_event_for_user(request, event_id):
         organisation__memberships__user=request.user,
         organisation__memberships__role__in=allowed_roles,
     )
+
+
+@login_required
+@require_GET
+def attendee_list(request, event_id):
+    """Show authorised event staff a searchable roster without exposing credentials."""
+    event = _scanner_event_for_user(request, event_id)
+    query = request.GET.get("q", "").strip()
+    status = request.GET.get("status", "").strip()
+    tickets = Ticket.objects.filter(event=event).select_related(
+        "owner", "ticket_category", "seat"
+    ).order_by("attendee_name", "reference")
+    if query:
+        tickets = tickets.filter(
+            Q(reference__icontains=query)
+            | Q(attendee_name__icontains=query)
+            | Q(owner__email__icontains=query)
+        )
+    statuses = {value for value, _ in Ticket.Status.choices}
+    if status in statuses:
+        tickets = tickets.filter(status=status)
+    page = Paginator(tickets, 50).get_page(request.GET.get("page"))
+    return render(request, "ticketing/attendee_list.html", {
+        "event": event,
+        "page": page,
+        "query": query,
+        "status": status,
+        "status_choices": Ticket.Status.choices,
+    })
 
 
 @login_required

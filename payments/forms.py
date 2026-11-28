@@ -1,5 +1,6 @@
 from django import forms
 
+from accounts.services import normalize_phone
 from organisations.models import OrganisationPaymentMethod
 
 from .models import Payment
@@ -46,7 +47,13 @@ class ManualPaymentForm(forms.ModelForm):
         return reference
 
     def clean_sender_phone(self):
-        return self.cleaned_data["sender_phone"].strip()
+        phone = self.cleaned_data["sender_phone"].strip()
+        if not phone:
+            return phone
+        try:
+            return normalize_phone(phone)
+        except ValueError as exc:
+            raise forms.ValidationError(str(exc)) from exc
 
     def clean(self):
         cleaned = super().clean()
@@ -84,4 +91,6 @@ class PaymentReviewForm(forms.Form):
         cleaned = super().clean()
         if cleaned.get("decision") == "approve" and cleaned.get("received_amount_maloti") is None:
             self.add_error("received_amount_maloti", "Enter the amount confirmed in the mobile money record.")
+        if cleaned.get("decision") == "reject" and not cleaned.get("review_note", "").strip():
+            self.add_error("review_note", "Explain why this payment was rejected.")
         return cleaned

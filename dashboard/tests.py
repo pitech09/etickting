@@ -212,6 +212,45 @@ class PendingPaymentsDashboardTests(TestCase):
         review = payment.review_history.get()
         self.assertEqual(review.decision, PaymentReview.Decision.REJECTED)
 
+    def test_rejection_requires_an_auditable_reason(self):
+        from payments.forms import PaymentReviewForm
+
+        form = PaymentReviewForm(data={"decision": "reject", "review_note": "  "})
+
+        self.assertFalse(form.is_valid())
+        self.assertIn("Explain why this payment was rejected.", str(form.errors))
+
+    def test_sender_phone_is_normalised_before_storage(self):
+        self.client.force_login(self.customer)
+
+        response = self.client.post(
+            reverse("orders:order-detail", args=[self.order.pk]),
+            {
+                "payment_method": str(self.payment_method.pk),
+                "provider_reference": "MPESA-NORMALISED-1",
+                "sender_phone": "050 123 4567",
+            },
+        )
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.order.payments.get().sender_phone, "+266501234567")
+
+    def test_payment_confirmation_requires_transaction_reference(self):
+        from payments.services import confirm_payment
+
+        payment = Payment.objects.create(
+            order=self.order,
+            payment_method=self.payment_method,
+            provider=Payment.Provider.MPESA,
+            amount_minor=self.order.total_minor,
+        )
+
+        with self.assertRaisesMessage(ValueError, "provider transaction reference is required"):
+            confirm_payment(payment_id=payment.pk, provider_reference="")
+
+        payment.refresh_from_db()
+        self.assertEqual(payment.status, Payment.Status.PENDING)
+
     def test_organiser_cannot_start_customer_checkout(self):
         self.client.force_login(self.organiser)
         response = self.client.get(reverse("orders:order-create", args=[self.event.pk]))
@@ -255,6 +294,37 @@ class PendingPaymentsDashboardTests(TestCase):
         self.assertContains(response, self.event.name)
         self.assertContains(response, category.name)
 
+    def test_public_event_filters_by_ticket_format_and_reports_invalid_dates(self):
+        from datetime import timedelta
+
+        self.event.ticket_categories.create(name="General", price_minor="10.00", total_quantity=5)
+        self.event.status = Event.Status.PUBLISHED
+        self.event.save(update_fields=["status"])
+        reserved = Event.objects.create(
+            organisation=self.event.organisation,
+            name="Reserved Night",
+            starts_at=timezone.now() + timedelta(days=2),
+            status=Event.Status.PUBLISHED,
+            ticketing_model=Event.TicketingModel.RESERVED_SEATING,
+        )
+        reserved.ticket_categories.create(name="Seat", price_minor="20.00", total_quantity=5)
+
+        response = self.client.get(
+            reverse("public-event-list"),
+            {"ticketing_model": "reserved_seating", "date_from": "not-a-date"},
+        )
+
+        self.assertContains(response, reserved.name)
+        self.assertNotContains(response, self.event.name)
+        self.assertContains(response, "Use valid dates to filter events.")
+
+    def test_customer_order_page_explains_live_payment_status(self):
+        self.client.force_login(self.customer)
+        response = self.client.get(reverse("orders:order-detail", args=[self.order.pk]))
+        self.assertContains(response, "Payment status")
+        self.assertContains(response, "Not submitted")
+        self.assertContains(response, "Refresh status")
+
     def test_organiser_can_download_event_attendee_and_admission_report(self):
         from ticketing.models import Admission, Ticket
 
@@ -281,6 +351,71 @@ class PendingPaymentsDashboardTests(TestCase):
         self.assertIn("REPORT-1", body)
         self.assertIn("Report Attendee", body)
         self.assertIn("North gate", body)
+
+    def test_event_operations_page_links_to_attendees_refunds_and_settlements(self):
+        self.client.force_login(self.organiser)
+
+        response = self.client.get(reverse("ticketing:event-detail", args=[self.event.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, reverse("event-attendee-export", args=[self.event.pk]))
+        self.assertContains(response, reverse("event-organiser-refunds", args=[self.event.pk]))
+        self.assertContains(
+            response,
+            reverse("finance:event-report", args=[self.event.pk]),
+        )
+
+    def test_authorised_event_staff_can_filter_the_attendee_roster(self):
+        from ticketing.models import Ticket
+
+        ticket = Ticket.objects.create(
+            event=self.event,
+            owner=self.customer,
+            reference="ATTENDEE-1",
+            attendee_name="Roster Customer",
+            payment_verified_at=timezone.now(),
+        )
+        self.client.force_login(self.organiser)
+
+        response = self.client.get(
+            reverse("ticketing:attendee-list", args=[self.event.pk]),
+            {"q": "Roster", "status": ticket.status},
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Roster Customer")
+        self.assertContains(response, "ATTENDEE-1")
+
+    def test_event_staff_cannot_change_event_lifecycle_or_categories(self):
+        staff = User.objects.create_user(email="operations-staff@example.com", password="pass-12345")
+        OrganisationMembership.objects.create(
+            organisation=self.event.organisation,
+            user=staff,
+            role=OrganisationMembership.Role.EVENT_STAFF,
+        )
+        self.client.force_login(staff)
+
+        publish = self.client.post(reverse("ticketing:event-publish", args=[self.event.pk]))
+        category_create = self.client.get(
+            reverse("ticketing:ticket-category-create", args=[self.event.pk])
+        )
+
+        self.assertEqual(publish.status_code, 403)
+        self.assertEqual(category_create.status_code, 403)
+        self.event.refresh_from_db()
+        self.assertEqual(self.event.status, Event.Status.DRAFT)
+
+    def test_event_payment_queue_is_scoped_to_the_selected_event(self):
+        other_event = Event.objects.create(
+            organisation=self.event.organisation, name="Other Queue Event", starts_at=timezone.now()
+        )
+        other_order = Order.objects.create(customer=self.customer, event=other_event, total_minor="30.00")
+        self.client.force_login(self.organiser)
+
+        response = self.client.get(reverse("event-pending-payments", args=[self.event.pk]))
+
+        self.assertContains(response, self.order.reference)
+        self.assertNotContains(response, other_order.reference)
 
     def test_organiser_report_cannot_cross_organisation_boundaries(self):
         other = User.objects.create_user(email="other-organiser@example.com", password="pass-12345")

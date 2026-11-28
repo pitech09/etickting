@@ -7,6 +7,7 @@ from django.contrib.auth.decorators import login_required
 from django.contrib.auth.mixins import LoginRequiredMixin
 from django.core.exceptions import PermissionDenied
 from django.db import IntegrityError, transaction
+from django.db.models import Count, Min, Prefetch
 from django.http import JsonResponse, HttpResponse
 from django.shortcuts import get_object_or_404, redirect, render
 from django.template.loader import render_to_string
@@ -22,7 +23,7 @@ from seating.models import Seat
 from seating.services import reserve_seats
 from dashboard.views import customer_required
 from payments.forms import ManualPaymentForm
-from payments.models import Payment
+from payments.models import Payment, RefundRequest
 
 from .services import (
     calculate_order_total,
@@ -134,13 +135,20 @@ def order_create(request, event_id):
         "form": form,
         "event": event,
         "idempotency_key": request.POST.get("idempotency_key", "") or uuid.uuid4().hex,
+        "ticket_price_data": {
+            str(category.id): str(category.price_minor)
+            for category in TicketCategory.objects.filter(event=event, is_active=True)
+        },
     })
 
 
 @customer_required
 def order_list(request):
     """List orders for the current user."""
-    orders = request.user.orders.select_related("event").order_by("-created_at")
+    orders = request.user.orders.select_related("event").annotate(ticket_count=Count("tickets")).prefetch_related(
+        Prefetch("payments", queryset=Payment.objects.order_by("-created_at"), to_attr="payment_history"),
+        Prefetch("refund_requests", queryset=RefundRequest.objects.order_by("-requested_at"), to_attr="refund_history"),
+    ).order_by("-created_at")
     return render(request, "orders/order_list.html", {"orders": orders})
 
 
@@ -155,6 +163,14 @@ def order_detail(request, pk):
     )
     expire_order_if_holds_expired(order)
     order.refresh_from_db()
+    reservation_expires_at = order.inventory_holds.filter(
+        status="active", expires_at__gt=timezone.now(),
+    ).aggregate(expires_at=Min("expires_at"))["expires_at"]
+    seat_expiry = order.lines.filter(
+        seat_reservation__status="active", seat_reservation__expires_at__gt=timezone.now(),
+    ).aggregate(expires_at=Min("seat_reservation__expires_at"))["expires_at"]
+    if seat_expiry and (not reservation_expires_at or seat_expiry < reservation_expires_at):
+        reservation_expires_at = seat_expiry
     form = ManualPaymentForm(organisation=order.event.organisation)
     if request.method == "POST":
         if order.status != Order.Status.PENDING:
@@ -200,6 +216,7 @@ def order_detail(request, pk):
             "support_email": settings.SUPPORT_EMAIL,
             "payment_methods": order.event.organisation.payment_methods.filter(is_active=True),
             "payment": order.payments.order_by("-created_at").first(),
+            "reservation_expires_at": reservation_expires_at,
         },
     )
 

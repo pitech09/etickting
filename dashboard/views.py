@@ -23,7 +23,14 @@ from ticketing.models import Ticket
 import csv
 from payments.forms import PaymentReviewForm
 from payments.models import Payment, PaymentReview
-from payments.services import confirm_payment
+from payments.services import (
+    complete_refund,
+    confirm_payment,
+    fail_refund,
+    request_refund as create_refund_request,
+    review_refund,
+    start_refund_processing,
+)
 
 
 def organiser_required(view):
@@ -242,8 +249,18 @@ def _public_events():
     return events
 
 
+def _with_public_availability(events):
+    events = list(events)
+    for event in events:
+        categories = list(event.ticket_categories.all())
+        event.has_ticket_categories = bool(categories)
+        event.available_ticket_count = sum(category.available_count for category in categories)
+        event.has_available_tickets = event.available_ticket_count > 0
+    return events
+
+
 def public_home(request):
-    events = list(_public_events())
+    events = _with_public_availability(_public_events())
     return render(
         request,
         "public/home.html",
@@ -258,6 +275,9 @@ def public_event_list(request):
     location = request.GET.get("location", "").strip()
     date_from = request.GET.get("date_from", "").strip()
     date_to = request.GET.get("date_to", "").strip()
+    ticketing_model = request.GET.get("ticketing_model", "").strip()
+    availability = request.GET.get("availability", "").strip()
+    sort = request.GET.get("sort", "soonest").strip()
     if query:
         events = events.filter(
             Q(name__icontains=query)
@@ -271,14 +291,29 @@ def public_event_list(request):
         events = events.filter(
             Q(venue__city__icontains=location) | Q(venue__name__icontains=location)
         )
+    if ticketing_model in {Event.TicketingModel.GENERAL_ADMISSION, Event.TicketingModel.RESERVED_SEATING}:
+        events = events.filter(ticketing_model=ticketing_model)
     try:
         if date_from:
             events = events.filter(starts_at__date__gte=date.fromisoformat(date_from))
         if date_to:
             events = events.filter(starts_at__date__lte=date.fromisoformat(date_to))
     except ValueError:
+        messages.warning(request, "Use valid dates to filter events.")
         date_from = ""
         date_to = ""
+    if sort == "latest":
+        events = events.order_by("-starts_at")
+    else:
+        sort = "soonest"
+        events = events.order_by("starts_at")
+    events = _with_public_availability(events.distinct())
+    if availability == "available":
+        events = [event for event in events if event.has_available_tickets]
+    elif availability == "sold_out":
+        events = [event for event in events if not event.has_available_tickets]
+    else:
+        availability = ""
     categories = (
         Event.objects.filter(
             Q(status=Event.Status.PUBLISHED) | Q(status=Event.Status.SALES_OPEN),
@@ -292,12 +327,15 @@ def public_event_list(request):
         request,
         "public/event_list.html",
         {
-            "events": events.distinct(),
+            "events": events,
             "query": query,
             "category": category,
             "location": location,
             "date_from": date_from,
             "date_to": date_to,
+            "ticketing_model": ticketing_model,
+            "availability": availability,
+            "sort": sort,
             "categories": categories,
         },
     )
@@ -380,6 +418,24 @@ def pending_payments(request):
             Q(reference__icontains=query) | Q(payments__provider_reference__icontains=query)
         ).distinct()
     return render(request, "dashboard/pending_payments.html", {"orders": orders, "query": query})
+
+
+@payment_reviewer_required
+def event_pending_payments(request, event_id):
+    from orders.models import Order
+
+    event = get_object_or_404(
+        Event.objects.filter(organisation__memberships__user=request.user), pk=event_id
+    )
+    query = request.GET.get("q", "").strip()
+    orders = Order.objects.filter(event=event, status=Order.Status.PENDING).select_related(
+        "event", "customer"
+    ).prefetch_related("payments").order_by("created_at")
+    if query:
+        orders = orders.filter(
+            Q(reference__icontains=query) | Q(payments__provider_reference__icontains=query)
+        ).distinct()
+    return render(request, "dashboard/pending_payments.html", {"orders": orders, "query": query, "event": event})
 
 
 @payment_reviewer_required
@@ -477,3 +533,121 @@ def customer_dashboard(request):
         "ticket_count": tickets.count(),
         "order_count": orders.count(),
     })
+
+
+@customer_required
+@require_POST
+def request_order_refund(request, order_id):
+    amount = request.POST.get("amount_maloti", "")
+    try:
+        refund = create_refund_request(
+            order_id=order_id,
+            requester=request.user,
+            amount_minor=amount,
+            reason=request.POST.get("reason", ""),
+        )
+    except (ValueError, PermissionDenied) as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, f"Refund request {refund.id} was submitted for review.")
+    return redirect("orders:order-detail", pk=order_id)
+
+
+@customer_required
+def customer_refunds(request):
+    from payments.models import RefundRequest
+
+    refunds = RefundRequest.objects.filter(requester=request.user).select_related("order__event")
+    return render(request, "dashboard/customer_refunds.html", {"refunds": refunds})
+
+
+@payment_reviewer_required
+def organiser_refunds(request):
+    from payments.models import RefundRequest
+
+    refunds = RefundRequest.objects.all()
+    if not (request.user.is_staff or request.user.is_superuser):
+        refunds = refunds.filter(order__event__organisation__memberships__user=request.user)
+    refunds = refunds.select_related("order__event", "requester", "reviewer", "executor")
+    return render(request, "dashboard/organiser_refunds.html", {"refunds": refunds})
+
+
+@payment_reviewer_required
+def event_organiser_refunds(request, event_id):
+    from payments.models import RefundRequest
+
+    event = get_object_or_404(
+        Event.objects.filter(organisation__memberships__user=request.user), pk=event_id
+    )
+    refunds = RefundRequest.objects.filter(order__event=event).select_related(
+        "order__event", "requester", "reviewer", "executor"
+    )
+    return render(request, "dashboard/organiser_refunds.html", {"refunds": refunds, "event": event})
+
+
+@payment_reviewer_required
+@require_POST
+def organiser_refund_review(request, refund_id):
+    try:
+        amount = request.POST.get("approved_amount_maloti") or None
+        refund = review_refund(
+            refund_id=refund_id,
+            reviewer=request.user,
+            decision=request.POST.get("decision", ""),
+            approved_amount_minor=amount,
+            note=request.POST.get("review_note", ""),
+        )
+    except (ValueError, PermissionDenied) as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, f"Refund {refund.id} is now {refund.get_status_display().lower()}.")
+    return redirect("organiser-refunds")
+
+
+@payment_reviewer_required
+@require_POST
+def organiser_refund_start(request, refund_id):
+    try:
+        refund = start_refund_processing(
+            refund_id=refund_id,
+            actor=request.user,
+            note=request.POST.get("execution_note", ""),
+        )
+    except (ValueError, PermissionDenied) as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, f"Refund {refund.id} is awaiting verified execution.")
+    return redirect("organiser-refunds")
+
+
+@payment_reviewer_required
+@require_POST
+def organiser_refund_complete(request, refund_id):
+    try:
+        refund = complete_refund(
+            refund_id=refund_id,
+            actor=request.user,
+            provider_reference=request.POST.get("provider_reference", ""),
+            note=request.POST.get("execution_note", ""),
+        )
+    except (ValueError, PermissionDenied) as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.success(request, f"Refund {refund.id} was recorded as completed.")
+    return redirect("organiser-refunds")
+
+
+@payment_reviewer_required
+@require_POST
+def organiser_refund_fail(request, refund_id):
+    try:
+        refund = fail_refund(
+            refund_id=refund_id,
+            actor=request.user,
+            note=request.POST.get("execution_note", ""),
+        )
+    except (ValueError, PermissionDenied) as exc:
+        messages.error(request, str(exc))
+    else:
+        messages.error(request, f"Refund {refund.id} requires intervention.")
+    return redirect("organiser-refunds")

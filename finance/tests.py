@@ -1,14 +1,15 @@
 from decimal import Decimal
 from django.test import TestCase
+from django.urls import reverse
 
 from accounts.models import User
-from organisations.models import Organisation
+from organisations.models import Organisation, OrganisationMembership
 from orders.models import Order
 from django.utils import timezone
 
 from payments.models import Payment
 from .models import CommissionTransaction, LedgerEntry, Payout, PlatformCommissionConfig
-from .services import calculate_commission, create_payout, organisation_earnings, record_balanced_transaction, record_commission_for_payment, settle_payout
+from .services import calculate_commission, create_payout, initiate_payout, organisation_earnings, record_balanced_transaction, record_commission_for_payment, settle_payout
 
 
 class FinanceTests(TestCase):
@@ -69,5 +70,54 @@ class FinanceTests(TestCase):
         self.assertEqual(organisation_earnings(organisation=organisation)["payable_minor"], Decimal("94.00"))
         payout = create_payout(organisation=organisation, amount_minor=Decimal("94.00"), idempotency_key="settlement-1")
         self.assertEqual(Payout.objects.count(), 1)
+        self.assertEqual(payout.status, Payout.Status.PENDING)
+        initiate_payout(payout_id=payout.pk)
         settle_payout(payout_id=payout.pk, provider_reference="BANK-1")
         self.assertEqual(organisation_earnings(organisation=organisation)["payable_minor"], Decimal("0.00"))
+
+    def test_event_payout_is_attributed_and_cannot_exceed_organisation_balance(self):
+        organisation = Organisation.objects.create(name="Event Settlement Org", slug="event-settlement-org")
+        customer = User.objects.create_user(email="event-settlement-buyer@example.com", password="pass-12345")
+        event = organisation.events.create(name="Settlement Event", starts_at=timezone.now())
+        Order.objects.create(customer=customer, event=event, status=Order.Status.PAID, total_minor="100.00")
+
+        payout = create_payout(
+            organisation=organisation,
+            event=event,
+            amount_minor="100.00",
+            idempotency_key="event-settlement-1",
+            request_note="Post-event settlement",
+        )
+
+        self.assertEqual(payout.event, event)
+        self.assertEqual(payout.request_note, "Post-event settlement")
+        self.assertEqual(organisation_earnings(organisation=organisation, event=event)["payable_minor"], Decimal("100.00"))
+        with self.assertRaisesMessage(ValueError, "Payout exceeds the organisation's payable balance"):
+            create_payout(
+                organisation=organisation,
+                event=event,
+                amount_minor="0.01",
+                idempotency_key="event-settlement-2",
+            )
+
+    def test_event_report_and_payout_request_are_manager_scoped(self):
+        organisation = Organisation.objects.create(name="Event Report Org", slug="event-report-org")
+        manager = User.objects.create_user(email="settlement-manager@example.com", password="pass-12345")
+        staff = User.objects.create_user(email="settlement-staff@example.com", password="pass-12345")
+        OrganisationMembership.objects.create(organisation=organisation, user=manager, role=OrganisationMembership.Role.EVENT_MANAGER)
+        OrganisationMembership.objects.create(organisation=organisation, user=staff, role=OrganisationMembership.Role.EVENT_STAFF)
+        customer = User.objects.create_user(email="settlement-report-buyer@example.com", password="pass-12345")
+        event = organisation.events.create(name="Reportable Event", starts_at=timezone.now())
+        Order.objects.create(customer=customer, event=event, status=Order.Status.PAID, total_minor="50.00")
+
+        self.client.force_login(staff)
+        self.assertEqual(self.client.get(reverse("finance:event-report", args=[event.pk])).status_code, 404)
+        self.client.force_login(manager)
+        response = self.client.post(reverse("finance:event-payout-request", args=[event.pk]), {
+            "amount_maloti": "50.00", "request_key": "request-1", "request_note": "Event close-out",
+        })
+
+        self.assertRedirects(response, reverse("finance:event-report", args=[event.pk]))
+        payout = Payout.objects.get(event=event)
+        self.assertEqual(payout.requested_by, manager)
+        self.assertEqual(payout.amount_minor, Decimal("50.00"))

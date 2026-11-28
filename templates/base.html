@@ -36,6 +36,7 @@
             <a href="{% url 'customer-dashboard' %}">Overview</a>
             <a href="{% url 'ticketing:ticket-wallet' %}">My tickets</a>
             <a href="{% url 'orders:order-list' %}">Orders</a>
+            <a href="{% url 'notifications:inbox' %}">Updates</a>
           {% endif %}
           <span class="nav-user"><span class="nav-user-name">{{ user.first_name|default:user.email }}</span><span class="nav-user-role">{% if user.is_staff or user.is_superuser %}Platform admin{% elif user.organisation_memberships.exists %}Organiser{% else %}Customer{% endif %}</span></span>
           <form method="post" action="{% url 'logout' %}" class="d-inline">{% csrf_token %}<button class="btn btn-nav-secondary btn-sm" type="submit">Log out</button></form>

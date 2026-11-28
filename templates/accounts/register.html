@@ -29,6 +29,8 @@
 
             {% for field in form %}{% include "components/form_field.html" with field=field %}{% endfor %}
 
+            <p class="form-text">We’ll send a one-time verification code to your phone after registration. Never share the code or your mobile-money PIN.</p>
+
             <button type="submit" class="auth-submit">
                 Create customer account
                 <span aria-hidden="true">→</span>

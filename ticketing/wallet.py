@@ -3,9 +3,10 @@ import textwrap
 
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
+from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.http import HttpResponse
-from django.shortcuts import get_object_or_404, render
+from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
 from .forms import TicketAttendeeForm
@@ -18,6 +19,27 @@ from .services import current_credential
 def wallet(request):
     tickets = Ticket.objects.filter(owner=request.user).select_related("event", "ticket_category", "seat").order_by("-issued_at")
     return render(request, "ticketing/wallet.html", {"tickets": tickets})
+
+
+@login_required
+@require_POST
+def resend_ticket(request, pk):
+    ticket = get_object_or_404(
+        Ticket.objects.select_related("event", "owner"),
+        pk=pk,
+        owner=request.user,
+    )
+    if ticket.status not in {Ticket.Status.ISSUED, Ticket.Status.ADMITTED}:
+        messages.error(request, "This ticket is no longer valid for delivery. Check its current status in your wallet.")
+        return redirect("ticketing:ticket-detail", pk=ticket.pk)
+    from notifications.services import deliver_ticket
+
+    delivery = deliver_ticket(ticket=ticket)
+    if delivery["email_sent"] or delivery["notification_id"]:
+        messages.success(request, "Your ticket was sent again. You can also open it directly from your wallet.")
+    else:
+        messages.warning(request, "We could not send email. Open the ticket directly from your wallet.")
+    return redirect("ticketing:ticket-detail", pk=ticket.pk)
 
 
 @login_required
